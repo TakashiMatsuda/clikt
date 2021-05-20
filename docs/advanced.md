@@ -17,34 +17,37 @@ and returns a map of aliases to the tokens that they alias to.
 
 To implement git-style aliases:
 
-```kotlin tab="Example"
-class Repo : NoOpCliktCommand() {
-    // You could load the aliases from a config file etc.
-    override fun aliases(): Map<String, List<String>> = mapOf(
-            "ci" to listOf("commit"),
-            "cm" to listOf("commit", "-m")
-    )
-}
-
-class Commit: CliktCommand() {
-    val message by option("-m").default("")
-    override fun run() {
-        echo("Committing with message: $message")
+=== "Example"
+    ```kotlin
+    class Repo : NoOpCliktCommand() {
+        // You could load the aliases from a config file etc.
+        override fun aliases(): Map<String, List<String>> = mapOf(
+                "ci" to listOf("commit"),
+                "cm" to listOf("commit", "-m")
+        )
     }
-}
 
-fun main(args: Array<String>) = Repo().subcommands(Commit()).main(args)
-```
+    class Commit: CliktCommand() {
+        val message by option("-m").default("")
+        override fun run() {
+            echo("Committing with message: $message")
+        }
+    }
 
-```text tab="Usage 1"
-$ ./repo ci -m 'my message'
-Committing with message: my message
-```
+    fun main(args: Array<String>) = Repo().subcommands(Commit()).main(args)
+    ```
 
-```text tab="Usage 2"
-$ ./repo cm 'my message'
-Committing with message: my message
-```
+=== "Usage 1"
+    ```text
+    $ ./repo ci -m 'my message'
+    Committing with message: my message
+    ```
+
+=== "Usage 2"
+    ```text
+    $ ./repo cm 'my message'
+    Committing with message: my message
+    ```
 
 Note that aliases are not expanded recursively: none of the tokens that
 an alias expands to will be expanded again, even if they match another
@@ -52,42 +55,44 @@ alias.
 
 You also use this functionality to implement command prefixes:
 
-```kotlin tab="Example"
-class Tool : NoOpCliktCommand() {
-    override fun aliases(): Map<String, List<String>> {
-        val prefixCounts = mutableMapOf<String, Int>().withDefault { 0 }
-        val prefixes = mutableMapOf<String, List<String>>()
-        for (name in registeredSubcommandNames()) {
-            if (name.length < 3) continue
-            for (i in 1..name.lastIndex) {
-                val prefix = name.substring(0..i)
-                prefixCounts[prefix] = prefixCounts.getValue(prefix) + 1
-                prefixes[prefix] = listOf(name)
+=== "Example"
+    ```kotlin
+    class Tool : NoOpCliktCommand() {
+        override fun aliases(): Map<String, List<String>> {
+            val prefixCounts = mutableMapOf<String, Int>().withDefault { 0 }
+            val prefixes = mutableMapOf<String, List<String>>()
+            for (name in registeredSubcommandNames()) {
+                if (name.length < 3) continue
+                for (i in 1..name.lastIndex) {
+                    val prefix = name.substring(0..i)
+                    prefixCounts[prefix] = prefixCounts.getValue(prefix) + 1
+                    prefixes[prefix] = listOf(name)
+                }
             }
+            return prefixes.filterKeys { prefixCounts.getValue(it) == 1 }
         }
-        return prefixes.filterKeys { prefixCounts.getValue(it) == 1 }
     }
-}
 
-class Foo: CliktCommand() {
-    override fun run() {
-        echo("Running Foo")
+    class Foo: CliktCommand() {
+        override fun run() {
+            echo("Running Foo")
+        }
     }
-}
 
-class Bar: CliktCommand() {
-    override fun run() {
-        echo("Running Bar")
+    class Bar: CliktCommand() {
+        override fun run() {
+            echo("Running Bar")
+        }
     }
-}
 
-fun main(args: Array<String>) = Tool().subcommands(Foo(), Bar()).main(args)
-```
+    fun main(args: Array<String>) = Tool().subcommands(Foo(), Bar()).main(args)
+    ```
 
-```text tab="Usage"
-$ ./tool ba
-Running Bar
-```
+=== "Usage"
+    ```text
+    $ ./tool ba
+    Running Bar
+    ```
 
 ## Token Normalization
 
@@ -98,21 +103,23 @@ works on more types of tokens. You can set a [`tokenTransformer`][tokenTransform
 called for each option and command name that is input. This can be used
 to implement case-insensitive parsing, for example:
 
-```kotlin tab="Example"
-class Hello : CliktCommand() {
-    init {
-        context { tokenTransformer = { it.toLowerCase() } }
+=== "Example"
+    ```kotlin
+    class Hello : CliktCommand() {
+        init {
+            context { tokenTransformer = { it.lowercase() } }
+        }
+
+        val name by option()
+        override fun run() = echo("Hello $name!")
     }
+    ```
 
-    val name by option()
-    override fun run() = echo("Hello $name!")
-}
-```
-
-```text tab="Usage"
-$ ./hello --NAME=Foo
-Hello Foo!
-```
+=== "Usage"
+    ```text
+    $ ./hello --NAME=Foo
+    Hello Foo!
+    ```
 
 ## Replacing stdin and stdout
 
@@ -146,9 +153,9 @@ class CustomCLI : NoOpCliktCommand() {
 If you are using [`TermUI`][TermUI] directly,
 you can also pass your custom console as an argument.
 
-## Command Line Argument Files ("@-files")
+## Command Line Argument Files ("@argfiles")
 
-Similar to `javac`, Clikt supports loading command line parameters from a file using the "@-file"
+Similar to `javac`, Clikt supports loading command line parameters from a file using the "@argfile"
 syntax. You can pass any file path to a command prefixed with `@`, and the file will be expanded
 into the command line parameters. This can be useful on operating systems like Windows that have
 command line length limits.
@@ -173,33 +180,35 @@ Which is equivalent to calling it like this:
 $ ./tool --number 1 --name='jane doe' --age=30 ./file.txt
 ```
 
-You can use any file path after the `@`, and can specify multiple @-files:
+You can use any file path after the `@`, and can specify multiple @argfiles:
 
 ```
 $ ./tool @../config/args @C:\\Program\ Files\\Tool\\argfile
 ```
 
-If you have any options with names that start with `@`, you can still use `@-files`, but values on
-the command line that match an option will be parsed as that option, rather than an `@-file`, so
+If you have any options with names that start with `@`, you can still use `@argfiles`, but values on
+the command line that match an option will be parsed as that option, rather than an `@argfile`, so
 you'll have to give your files a different name.
 
-### Preventing @-file expansion
+### Preventing @argfile expansion
 
 If you want to use a value starting with `@` as an argument without expanding it, you have three options:
 
 1. Pass it after a `--`, [which disables expansion for everything that occurs after it][dash-dash].
 2. Escape it with `@@`. The first `@` will be removed and the rest used as the argument value. For example, `@@file` will parse as the string `@file`
-3. Disable @-file expansion entirely by setting [`Context.expandArgumentFiles = false`][expandArgumentFiles]
+3. Disable @argfile expansion entirely by setting [`Context.expandArgumentFiles = false`][expandArgumentFiles]
 
 ### File format
 
-In argument files, normal shell quoting and escaping rules apply. Line breaks are treated as word
-separators, and can be used where you would normally use a space to separate parameters. Line breaks
-cannot occur within quotes. @-files can contain other @-file arguments, which will be expanded
-recursively.
-
-An unescaped `#` character outside of quotes is treated as a line comment: it and the rest of the
-line are skipped. You can pass a literal `#` by escaping it with `\#` or quoting it with `'#'`.
+- Normal shell quoting and escaping rules apply. 
+- Line breaks are treated as word separators, and can be used where you would normally use a space
+  to separate parameters.
+- Line breaks can occur within quotes, and will be included in the quoted value.
+- @argfiles can contain other @argfile arguments, which will be expanded recursively.
+- An unescaped `#` character outside of quotes is treated as a line comment: it and the rest of the
+  line are skipped. You can pass a literal `#` by escaping it with `\#` or quoting it with `'#'`.
+- If a `\` occurs at the end of a line, the next line is trimmed of leading whitespace and the two
+  lines are concatenated.
 
 ## Testing your Clikt CLI
 
@@ -237,23 +246,23 @@ All functionality is supported, except the `hideInput` parameter of [prompt][pro
 ### Browser JavaScript
 
 The default [CliktConsole][CliktConsole] only outputs to the browser's developer console, which is
-probably not what you want. You can [define your own CliktConsole][#replacing-stdin-and-stdout], or
+probably not what you want. You can [define your own CliktConsole](#replacing-stdin-and-stdout), or
 you can call [parse][parse] instead of [main][main] and handle output yourself.
 
 [editText][editText] and [editFile][editFile] are not supported. [prompt][prompt] is only supported
 if you define your own CliktConsole.
 
-[aliases]:             api/clikt/com.github.ajalt.clikt.core/-clikt-command/aliases.md
-[CliktConsole]:        api/clikt/com.github.ajalt.clikt.output/-clikt-console/index.md
+[aliases]:             api/clikt/com.github.ajalt.clikt.core/-clikt-command/aliases.html
+[CliktConsole]:        api/clikt/com.github.ajalt.clikt.output/-clikt-console/index.html
 [customizing-context]: commands.md#customizing-contexts
 [dash-dash]:           arguments.md#option-like-arguments-using-
-[editFile]:            api/clikt/com.github.ajalt.clikt.output/-term-ui/edit-file/
-[editText]:            api/clikt/com.github.ajalt.clikt.output/-term-ui/edit-text/
-[expandArgumentFiles]: api/clikt/com.github.ajalt.clikt.core/-context/expand-argument-files.md
-[main]:                api/clikt/com.github.ajalt.clikt.core/-clikt-command/main.md
-[parse]:               api/clikt/com.github.ajalt.clikt.core/-clikt-command/parse.md
-[ProgramResult]:       api/clikt/com.github.ajalt.clikt.core/-program-result/index.md
-[prompt]:              api/clikt/com.github.ajalt.clikt.parameters.options/prompt.md
-[TermUI]:              api/clikt/com.github.ajalt.clikt.output/-term-ui/index.md
-[tokenTransformer]:    api/clikt/com.github.ajalt.clikt.core/-context/token-transformer.md
+[editFile]:            api/clikt/com.github.ajalt.clikt.output/-term-ui/edit-file.html
+[editText]:            api/clikt/com.github.ajalt.clikt.output/-term-ui/edit-text.html
+[expandArgumentFiles]: api/clikt/com.github.ajalt.clikt.core/-context/expand-argument-files.html
+[main]:                api/clikt/com.github.ajalt.clikt.core/-clikt-command/main.html
+[parse]:               api/clikt/com.github.ajalt.clikt.core/-clikt-command/parse.html
+[ProgramResult]:       api/clikt/com.github.ajalt.clikt.core/-program-result/index.html
+[prompt]:              api/clikt/com.github.ajalt.clikt.parameters.options/prompt.html
+[TermUI]:              api/clikt/com.github.ajalt.clikt.output/-term-ui/index.html
+[tokenTransformer]:    api/clikt/com.github.ajalt.clikt.core/-context/token-transformer.html
 

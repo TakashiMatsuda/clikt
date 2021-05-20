@@ -5,13 +5,12 @@ package com.github.ajalt.clikt.parameters.options
 
 import com.github.ajalt.clikt.completion.CompletionCandidates
 import com.github.ajalt.clikt.core.*
+import com.github.ajalt.clikt.parameters.arguments.transformAll
 import com.github.ajalt.clikt.parameters.groups.ParameterGroup
-import com.github.ajalt.clikt.parameters.groups.mutuallyExclusiveOptions
 import com.github.ajalt.clikt.parameters.internal.NullableLateinit
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parsers.OptionParser.Invocation
 import com.github.ajalt.clikt.parsers.OptionWithValuesParser
-import com.github.ajalt.clikt.sources.ExperimentalValueSourceApi
 import kotlin.js.JsName
 import kotlin.jvm.JvmMultifileClass
 import kotlin.jvm.JvmName
@@ -36,7 +35,7 @@ class OptionCallTransformContext(
     fun message(message: String) = context.command.issueMessage(message)
 
     /** If [value] is false, call [fail] with the output of [lazyMessage] */
-    inline fun require(value: Boolean, lazyMessage: () -> String = { "invalid value" }) {
+    inline fun require(value: Boolean, lazyMessage: () -> String = { "" }) {
         if (!value) fail(lazyMessage())
     }
 }
@@ -48,13 +47,13 @@ class OptionCallTransformContext(
  */
 class OptionTransformContext(val option: Option, val context: Context) : Option by option {
     /** Throw an exception indicating that usage was incorrect. */
-    fun fail(message: String): Nothing = throw UsageError(message, option)
+    fun fail(message: String): Nothing = throw BadParameterValue(message, option)
 
     /** Issue a message that can be shown to the user */
     fun message(message: String) = context.command.issueMessage(message)
 
     /** If [value] is false, call [fail] with the output of [lazyMessage] */
-    inline fun require(value: Boolean, lazyMessage: () -> String = { "invalid value" }) {
+    inline fun require(value: Boolean, lazyMessage: () -> String = { "" }) {
         if (!value) fail(lazyMessage())
     }
 }
@@ -87,8 +86,6 @@ typealias OptionValidator<AllT> = OptionTransformContext.(AllT) -> Unit
  *
  * @property metavarWithDefault The metavar to use. Specified at option creation.
  * @property envvar The environment variable name to use.
- * @property envvarSplit The pattern to split envvar values on. If the envvar splits into multiple values,
- *   each one will be treated like a separate invocation of the option.
  * @property valueSplit The pattern to split values from the command line on. By default, values are
  *   split on whitespace.
  * @property transformValue Called in [finalize] to transform each value provided to each invocation.
@@ -98,16 +95,15 @@ typealias OptionValidator<AllT> = OptionTransformContext.(AllT) -> Unit
  */
 // `AllT` is deliberately not an out parameter. If it was, it would allow undesirable combinations such as
 // default("").int()
-@OptIn(ExperimentalValueSourceApi::class)
-class OptionWithValues<AllT, EachT, ValueT>(
+class OptionWithValues<AllT, EachT, ValueT> internal constructor(
         names: Set<String>,
-        val metavarWithDefault: ValueWithDefault<String?>,
+        val metavarWithDefault: ValueWithDefault<Context.() -> String?>,
         override val nvalues: Int,
-        override val help: String,
+        override val optionHelp: String,
         override val hidden: Boolean,
         override val helpTags: Map<String, String>,
+        override val valueSourceKey: String?,
         val envvar: String?,
-        val envvarSplit: ValueWithDefault<Regex>,
         val valueSplit: Regex?,
         override val parser: OptionWithValuesParser,
         val completionCandidatesWithDefault: ValueWithDefault<CompletionCandidates>,
@@ -118,7 +114,7 @@ class OptionWithValues<AllT, EachT, ValueT>(
 ) : OptionDelegate<AllT>, GroupableOption {
     override var parameterGroup: ParameterGroup? = null
     override var groupName: String? = null
-    override val metavar: String? get() = metavarWithDefault.value
+    override fun metavar(context: Context): String? = metavarWithDefault.value.invoke(context)
     override var value: AllT by NullableLateinit("Cannot read from option delegate before parsing command line")
         private set
     override val secondaryNames: Set<String> get() = emptySet()
@@ -140,7 +136,10 @@ class OptionWithValues<AllT, EachT, ValueT>(
                 v.values.map { Invocation("", it.values) }
             }
             is FinalValue.Envvar -> {
-                v.value.split(envvarSplit.value).map { Invocation(v.key, listOf(it)) }
+                when (valueSplit) {
+                    null -> listOf(Invocation(v.key, listOf(v.value)))
+                    else -> listOf(Invocation(v.key, v.value.split(valueSplit)))
+                }
             }
         }
 
@@ -170,40 +169,68 @@ class OptionWithValues<AllT, EachT, ValueT>(
             transformAll: CallsTransformer<EachT, AllT>,
             validator: OptionValidator<AllT>,
             names: Set<String> = this.names,
-            metavarWithDefault: ValueWithDefault<String?> = this.metavarWithDefault,
+            metavarWithDefault: ValueWithDefault<Context.() -> String?> = this.metavarWithDefault,
             nvalues: Int = this.nvalues,
-            help: String = this.help,
+            help: String = this.optionHelp,
             hidden: Boolean = this.hidden,
             helpTags: Map<String, String> = this.helpTags,
+            valueSourceKey: String? = this.valueSourceKey,
             envvar: String? = this.envvar,
-            envvarSplit: ValueWithDefault<Regex> = this.envvarSplit,
             valueSplit: Regex? = this.valueSplit,
             parser: OptionWithValuesParser = this.parser,
             completionCandidatesWithDefault: ValueWithDefault<CompletionCandidates> = this.completionCandidatesWithDefault
     ): OptionWithValues<AllT, EachT, ValueT> {
-        return OptionWithValues(names, metavarWithDefault, nvalues, help, hidden,
-                helpTags, envvar, envvarSplit, valueSplit, parser, completionCandidatesWithDefault,
-                transformValue, transformEach, transformAll, validator)
+        return OptionWithValues(
+                names = names,
+                metavarWithDefault = metavarWithDefault,
+                nvalues = nvalues,
+                optionHelp = help,
+                hidden = hidden,
+                helpTags = helpTags,
+                valueSourceKey = valueSourceKey,
+                envvar = envvar,
+                valueSplit = valueSplit,
+                parser = parser,
+                completionCandidatesWithDefault = completionCandidatesWithDefault,
+                transformValue = transformValue,
+                transformEach = transformEach,
+                transformAll = transformAll,
+                transformValidator = validator
+        )
     }
 
     /** Create a new option that is a copy of this one with the same transforms. */
     fun copy(
             validator: OptionValidator<AllT> = this.transformValidator,
             names: Set<String> = this.names,
-            metavarWithDefault: ValueWithDefault<String?> = this.metavarWithDefault,
+            metavarWithDefault: ValueWithDefault<Context.() -> String?> = this.metavarWithDefault,
             nvalues: Int = this.nvalues,
-            help: String = this.help,
+            help: String = this.optionHelp,
             hidden: Boolean = this.hidden,
             helpTags: Map<String, String> = this.helpTags,
             envvar: String? = this.envvar,
-            envvarSplit: ValueWithDefault<Regex> = this.envvarSplit,
+            valueSourceKey: String? = this.valueSourceKey,
             valueSplit: Regex? = this.valueSplit,
             parser: OptionWithValuesParser = this.parser,
             completionCandidatesWithDefault: ValueWithDefault<CompletionCandidates> = this.completionCandidatesWithDefault
     ): OptionWithValues<AllT, EachT, ValueT> {
-        return OptionWithValues(names, metavarWithDefault, nvalues, help, hidden,
-                helpTags, envvar, envvarSplit, valueSplit, parser, completionCandidatesWithDefault,
-                transformValue, transformEach, transformAll, validator)
+        return OptionWithValues(
+                names = names,
+                metavarWithDefault = metavarWithDefault,
+                nvalues = nvalues,
+                optionHelp = help,
+                hidden = hidden,
+                helpTags = helpTags,
+                valueSourceKey = valueSourceKey,
+                envvar = envvar,
+                valueSplit = valueSplit,
+                parser = parser,
+                completionCandidatesWithDefault = completionCandidatesWithDefault,
+                transformValue = transformValue,
+                transformEach = transformEach,
+                transformAll = transformAll,
+                transformValidator = validator
+        )
     }
 }
 
@@ -234,8 +261,6 @@ internal fun <T> defaultValidator(): OptionValidator<T> = { }
  * @param hidden Hide this option from help outputs.
  * @param envvar The environment variable that will be used for the value if one is not given on the command
  *   line.
- * @param envvarSplit The pattern to split the value of the [envvar] on. Defaults to whitespace,
- *   although some conversions like `file` change the default.
  * @param helpTags Extra information about this option to pass to the help formatter
  */
 @Suppress("unused")
@@ -245,18 +270,18 @@ fun ParameterHolder.option(
         metavar: String? = null,
         hidden: Boolean = false,
         envvar: String? = null,
-        envvarSplit: Regex? = null,
         helpTags: Map<String, String> = emptyMap(),
-        completionCandidates: CompletionCandidates? = null
+        completionCandidates: CompletionCandidates? = null,
+        valueSourceKey: String? = null
 ): RawOption = OptionWithValues(
         names = names.toSet(),
-        metavarWithDefault = ValueWithDefault(metavar, "TEXT"),
+        metavarWithDefault = ValueWithDefault(metavar?.let { { it } }, { localization.stringMetavar() }),
         nvalues = 1,
-        help = help,
+        optionHelp = help,
         hidden = hidden,
         helpTags = helpTags,
+        valueSourceKey = valueSourceKey,
         envvar = envvar,
-        envvarSplit = ValueWithDefault(envvarSplit, Regex("\\s+")),
         valueSplit = null,
         parser = OptionWithValuesParser,
         completionCandidatesWithDefault = ValueWithDefault(completionCandidates, CompletionCandidates.None),
@@ -267,12 +292,32 @@ fun ParameterHolder.option(
 )
 
 /**
+ * Set the help for this option.
+ *
+ * Although you would normally pass the help string as an argument to [option], this function
+ * can be more convenient for long help strings.
+ *
+ * ### Example:
+ *
+ * ```
+ * val number by option()
+ *      .int()
+ *      .help("This is an option that takes a number")
+ * ```
+ */
+fun <AllT, EachT, ValueT> OptionWithValues<AllT, EachT, ValueT>.help(help: String): OptionWithValues<AllT, EachT, ValueT> {
+    return copy(help = help)
+}
+
+/**
  * Check the final option value and raise an error if it's not valid.
  *
- * The [validator] is called with the final option type (the output of [transformAll]), and should call `fail`
- * if the value is not valid. It is not called if the delegate value is null.
+ * The [validator] is called with the final option type (the output of [transformAll]), and should
+ * call [fail][OptionTransformContext.fail] if the value is not valid.
  *
- * You can also call `require` to fail automatically if an expression is false.
+ * Your [validator] can also call [require][OptionTransformContext.require] to fail automatically if
+ * an expression is false, or [message][OptionTransformContext.message] to show the user a warning
+ * message without aborting.
  *
  * ### Example:
  *
@@ -289,11 +334,13 @@ fun <AllT : Any, EachT, ValueT> OptionWithValues<AllT, EachT, ValueT>.validate(
 /**
  * Check the final option value and raise an error if it's not valid.
  *
- * The [validator] is called with the final option type (the output of [transformAll]), and should call `fail`
- * if the value is not valid. It is not called if the delegate value is null.
+ * The [validator] is called with the final option type (the output of [transformAll]), and should
+ * call [fail][OptionTransformContext.fail] if the value is not valid. The [validator] is not called
+ * if the delegate value is null.
  *
- * You can also call `require` to fail automatically if an expression is false, or `warn` to show
- * the user a warning message without aborting.
+ * Your [validator] can also call [require][OptionTransformContext.require] to fail automatically if
+ * an expression is false, or [message][OptionTransformContext.message] to show the user a warning
+ * message without aborting.
  *
  * ### Example:
  *
@@ -303,10 +350,102 @@ fun <AllT : Any, EachT, ValueT> OptionWithValues<AllT, EachT, ValueT>.validate(
  */
 @JvmName("nullableValidate")
 @JsName("nullableValidate")
-fun <AllT : Any, EachT, ValueT> OptionWithValues<AllT?, EachT, ValueT>.validate(
-        validator: OptionValidator<AllT>
+inline fun <AllT : Any, EachT, ValueT> OptionWithValues<AllT?, EachT, ValueT>.validate(
+        crossinline validator: OptionValidator<AllT>
 ): OptionDelegate<AllT?> {
     return copy(transformValue, transformEach, transformAll, { if (it != null) validator(it) })
+}
+
+/**
+ * Check the final option value and raise an error if it's not valid.
+ *
+ * The [validator] is called with the final option type (the output of [transformAll]), and should
+ * return `false` if the value is not valid. You can specify a [message] to include in the error
+ * output.
+ *
+ * You can use [validate] for more complex checks.
+ *
+ * ### Example:
+ *
+ * ```
+ * val opt by option().int().check("value must be even") { it % 2 == 0 }
+ * ```
+ */
+inline fun <AllT : Any, EachT, ValueT> OptionWithValues<AllT, EachT, ValueT>.check(
+        message: String,
+        crossinline validator: (AllT) -> Boolean
+): OptionDelegate<AllT> {
+    return check({ message }, validator)
+}
+
+/**
+ * Check the final argument value and raise an error if it's not valid.
+ *
+ * The [validator] is called with the final option type (the output of [transformAll]), and should
+ * return `false` if the value is not valid. You can specify a [lazyMessage] the returns a message
+ * to include in the error output.
+ *
+ * You can use [validate] for more complex checks.
+ *
+ * ### Example:
+ *
+ * ```
+ * val opt by option().int().check(lazyMessage={"$it is not even"}) { it % 2 == 0 }
+ * ```
+ */
+inline fun <AllT : Any, EachT, ValueT> OptionWithValues<AllT, EachT, ValueT>.check(
+        crossinline lazyMessage: (AllT) -> String = { it.toString() },
+        crossinline validator: (AllT) -> Boolean
+): OptionDelegate<AllT> {
+    return validate { require(validator(it)) { lazyMessage(it) } }
+}
+
+/**
+ * Check the final option value and raise an error if it's not valid.
+ *
+ * The [validator] is called with the final option type (the output of [transformAll]), and should
+ * return `false` if the value is not valid. You can specify a [message] to include in the error
+ * output. The [validator] is not called if the delegate value is null.
+ *
+ * You can use [validate] for more complex checks.
+ *
+ * ### Example:
+ *
+ * ```
+ * val opt by option().int().check("value must be even") { it % 2 == 0 }
+ * ```
+ */
+@JvmName("nullableCheck")
+@JsName("nullableCheck")
+inline fun <AllT : Any, EachT, ValueT> OptionWithValues<AllT?, EachT, ValueT>.check(
+        message: String,
+        crossinline validator: (AllT) -> Boolean
+): OptionDelegate<AllT?> {
+    return check({ message }, validator)
+}
+
+/**
+ * Check the final argument value and raise an error if it's not valid.
+ *
+ * The [validator] is called with the final option type (the output of [transformAll]), and should
+ * return `false` if the value is not valid. You can specify a [lazyMessage] the returns a message
+ * to include in the error output. The [validator] is not called if the delegate value is null.
+ *
+ * You can use [validate] for more complex checks.
+ *
+ * ### Example:
+ *
+ * ```
+ * val opt by option().int().check(lazyMessage={"$it is not even"}) { it % 2 == 0 }
+ * ```
+ */
+@JvmName("nullableLazyCheck")
+@JsName("nullableLazyCheck")
+inline fun <AllT : Any, EachT, ValueT> OptionWithValues<AllT?, EachT, ValueT>.check(
+        crossinline lazyMessage: (AllT) -> String = { it.toString() },
+        crossinline validator: (AllT) -> Boolean
+): OptionDelegate<AllT?> {
+    return validate { require(validator(it)) { lazyMessage(it) } }
 }
 
 /**
@@ -337,43 +476,3 @@ fun <AllT, EachT, ValueT> OptionWithValues<AllT, EachT, ValueT>.deprecated(
     val helpTags = if (tagName.isNullOrBlank()) helpTags else helpTags + mapOf(tagName to tagValue)
     return copy(transformValue, transformEach, deprecationTransformer(message, error, transformAll), transformValidator, helpTags = helpTags)
 }
-
-@Deprecated(
-        "Cannot wrap an option that isn't converted",
-        replaceWith = ReplaceWith("this.convert(wrapper)"),
-        level = DeprecationLevel.ERROR
-)
-@JvmName("rawWrapValue")
-@JsName("rawWrapValue")
-@Suppress("UNUSED_PARAMETER")
-fun RawOption.wrapValue(wrapper: (String) -> Any): RawOption = this
-
-/**
- * Wrap the option's values after a conversion is applied.
- *
- * This can be useful if you want to use different option types wrapped in a sealed class for
- * [mutuallyExclusiveOptions].
- *
- * This can only be called on an option after [convert] or a conversion function like [int].
- *
- * If you just want to perform checks on the value without converting it to another type, use
- * [validate] instead.
- *
- * ## Example
- *
- * ```
- * sealed class GroupTypes {
- *   data class FileType(val file: File) : GroupTypes()
- *   data class StringType(val string: String) : GroupTypes()
- * }
- *
- * val group by mutuallyExclusiveOptions<GroupTypes>(
- *   option("-f").file().wrapValue(::FileType),
- *   option("-s").convert { StringType(it) }
- * )
- * ```
- */
-@Deprecated("Use `convert` instead", ReplaceWith("this.convert(wrapper)"))
-inline fun <T1 : Any, T2 : Any> NullableOption<T1, T1>.wrapValue(
-        crossinline wrapper: (T1) -> T2
-): NullableOption<T2, T2> = convert { wrapper(it) }

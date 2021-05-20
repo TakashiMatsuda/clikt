@@ -5,6 +5,7 @@ package com.github.ajalt.clikt.parameters.options
 
 import com.github.ajalt.clikt.completion.CompletionCandidates
 import com.github.ajalt.clikt.core.BadParameterValue
+import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.UsageError
 import kotlin.jvm.JvmMultifileClass
 import kotlin.jvm.JvmName
@@ -13,9 +14,9 @@ import kotlin.jvm.JvmName
 /**
  * Convert the option's value type.
  *
- * The [conversion] is called once for each value in each invocation of the option. If any errors are thrown,
- * they are caught and a [BadParameterValue] is thrown with the error message. You can call `fail` to throw a
- * [BadParameterValue] manually.
+ * The [conversion] is called once for each value in each invocation of the option. If any errors
+ * are thrown, they are caught and a [BadParameterValue] is thrown with the error message. You can
+ * call [fail][OptionTransformContext.fail] to throw a [BadParameterValue] manually.
  *
  * You can call `convert` more than once to wrap the result of the previous `convert`, but it cannot
  * be called after [transformAll] (e.g. [multiple]) or [transformValues] (e.g. [pair]).
@@ -28,14 +29,41 @@ import kotlin.jvm.JvmName
  * ```
  *
  * @param metavar The metavar for the type. Overridden by a metavar passed to [option].
- * @param envvarSplit If the value is read from an envvar, the pattern to split the value on. The default
- *   splits on whitespace. This value is can be overridden by passing a value to the [option] function.
  * @param completionCandidates candidates to use when completing this option in shell autocomplete,
  *   if no candidates are specified in [option]
  */
 inline fun <InT : Any, ValueT : Any> NullableOption<InT, InT>.convert(
-        metavar: String = "VALUE",
-        envvarSplit: Regex = this.envvarSplit.default,
+        metavar: String,
+        completionCandidates: CompletionCandidates = completionCandidatesWithDefault.default,
+        crossinline conversion: ValueConverter<InT, ValueT>
+): NullableOption<ValueT, ValueT> {
+    return convert({ metavar }, completionCandidates, conversion)
+}
+
+/**
+ * Convert the option's value type.
+ *
+ * The [conversion] is called once for each value in each invocation of the option. If any errors
+ * are thrown, they are caught and a [BadParameterValue] is thrown with the error message. You can
+ * call [fail][OptionTransformContext.fail] to throw a [BadParameterValue] manually.
+ *
+ * You can call `convert` more than once to wrap the result of the previous `convert`, but it cannot
+ * be called after [transformAll] (e.g. [multiple]) or [transformValues] (e.g. [pair]).
+ *
+ * ## Example
+ *
+ * ```
+ * val bd: BigDecimal? by option().convert { it.toBigDecimal() }
+ * val fileText: ByteArray? by option().file().convert { it.readBytes() }
+ * ```
+ *
+ * @param metavar A lambda returning the metavar for the type. The lambda has a [Context] receiver
+ *   for access to localization. Overridden by a metavar passed to [option].
+ * @param completionCandidates candidates to use when completing this option in shell autocomplete,
+ *   if no candidates are specified in [option]
+ */
+inline fun <InT : Any, ValueT : Any> NullableOption<InT, InT>.convert(
+        noinline metavar: Context.() -> String = { localization.defaultMetavar() },
         completionCandidates: CompletionCandidates = completionCandidatesWithDefault.default,
         crossinline conversion: ValueConverter<InT, ValueT>
 ): NullableOption<ValueT, ValueT> {
@@ -51,7 +79,6 @@ inline fun <InT : Any, ValueT : Any> NullableOption<InT, InT>.convert(
     }
     return copy(proc, defaultEachProcessor(), defaultAllProcessor(), defaultValidator(),
             metavarWithDefault = metavarWithDefault.copy(default = metavar),
-            envvarSplit = this.envvarSplit.copy(default = envvarSplit),
             completionCandidatesWithDefault = completionCandidatesWithDefault.copy(default = completionCandidates)
     )
 }

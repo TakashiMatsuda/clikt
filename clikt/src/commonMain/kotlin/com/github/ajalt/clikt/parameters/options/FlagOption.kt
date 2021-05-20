@@ -7,9 +7,11 @@ import com.github.ajalt.clikt.parameters.internal.NullableLateinit
 import com.github.ajalt.clikt.parameters.types.valueToInt
 import com.github.ajalt.clikt.parsers.FlagOptionParser
 import com.github.ajalt.clikt.parsers.OptionParser
-import com.github.ajalt.clikt.sources.ExperimentalValueSourceApi
 import kotlin.properties.ReadOnlyProperty
 import kotlin.reflect.KProperty
+
+/** A block that converts a flag value from one type to another */
+typealias FlagConverter<InT, OutT> = OptionTransformContext.(InT) -> OutT
 
 /**
  * An [Option] that has no values.
@@ -19,13 +21,13 @@ import kotlin.reflect.KProperty
  * @property transformAll Called to transform all invocations of this option into the final option type.
  */
 // `T` is deliberately not an out parameter.
-@OptIn(ExperimentalValueSourceApi::class)
-class FlagOption<T>(
+class FlagOption<T> internal constructor(
         names: Set<String>,
         override val secondaryNames: Set<String>,
-        override val help: String,
+        override val optionHelp: String,
         override val hidden: Boolean,
         override val helpTags: Map<String, String>,
+        override val valueSourceKey: String?,
         val envvar: String?,
         val transformEnvvar: OptionTransformContext.(String) -> T,
         val transformAll: CallsTransformer<String, T>,
@@ -33,7 +35,7 @@ class FlagOption<T>(
 ) : OptionDelegate<T> {
     override var parameterGroup: ParameterGroup? = null
     override var groupName: String? = null
-    override val metavar: String? = null
+    override fun metavar(context: Context): String? = null
     override val nvalues: Int get() = 0
     override val parser = FlagOptionParser
     override var value: T by NullableLateinit("Cannot read from option delegate before parsing command line")
@@ -53,7 +55,8 @@ class FlagOption<T>(
             is FinalValue.Parsed -> transformAll(transformContext, invocations.map { it.name })
             is FinalValue.Sourced -> {
                 if (v.values.size != 1 || v.values[0].values.size != 1) {
-                    throw UsageError("Invalid flag value in file for option ${longestName()}", this)
+                    val message = context.localization.invalidFlagValueInFile(longestName() ?: "")
+                    throw UsageError(message, this)
                 }
                 transformEnvvar(transformContext, v.values[0].values[0])
             }
@@ -72,12 +75,24 @@ class FlagOption<T>(
             validator: OptionValidator<T>,
             names: Set<String> = this.names,
             secondaryNames: Set<String> = this.secondaryNames,
-            help: String = this.help,
+            help: String = this.optionHelp,
             hidden: Boolean = this.hidden,
             helpTags: Map<String, String> = this.helpTags,
+            valueSourceKey: String? = this.valueSourceKey,
             envvar: String? = this.envvar
     ): FlagOption<T> {
-        return FlagOption(names, secondaryNames, help, hidden, helpTags, envvar, transformEnvvar, transformAll, validator)
+        return FlagOption(
+                names = names,
+                secondaryNames = secondaryNames,
+                optionHelp = help,
+                hidden = hidden,
+                helpTags = helpTags,
+                valueSourceKey = valueSourceKey,
+                envvar = envvar,
+                transformEnvvar = transformEnvvar,
+                transformAll = transformAll,
+                validator = validator
+        )
     }
 
     /** Create a new option that is a copy of this one with the same transforms. */
@@ -85,12 +100,24 @@ class FlagOption<T>(
             validator: OptionValidator<T> = this.validator,
             names: Set<String> = this.names,
             secondaryNames: Set<String> = this.secondaryNames,
-            help: String = this.help,
+            help: String = this.optionHelp,
             hidden: Boolean = this.hidden,
             helpTags: Map<String, String> = this.helpTags,
+            valueSourceKey: String? = this.valueSourceKey,
             envvar: String? = this.envvar
     ): FlagOption<T> {
-        return FlagOption(names, secondaryNames, help, hidden, helpTags, envvar, transformEnvvar, transformAll, validator)
+        return FlagOption(
+                names = names,
+                secondaryNames = secondaryNames,
+                optionHelp = help,
+                hidden = hidden,
+                helpTags = helpTags,
+                valueSourceKey = valueSourceKey,
+                envvar = envvar,
+                transformEnvvar = transformEnvvar,
+                transformAll = transformAll,
+                validator = validator
+        )
     }
 }
 
@@ -117,28 +144,103 @@ fun RawOption.flag(
         defaultForHelp: String = ""
 ): FlagOption<Boolean> {
     val tags = helpTags + mapOf(HelpFormatter.Tags.DEFAULT to defaultForHelp)
-    return FlagOption(names, secondaryNames.toSet(), help, hidden, tags, envvar,
+    return FlagOption(
+            names = names,
+            secondaryNames = secondaryNames.toSet(),
+            optionHelp = optionHelp,
+            hidden = hidden,
+            helpTags = tags,
+            valueSourceKey = valueSourceKey,
+            envvar = envvar,
             transformEnvvar = {
-                when (it.toLowerCase()) {
+                when (it.lowercase()) {
                     "true", "t", "1", "yes", "y", "on" -> true
                     "false", "f", "0", "no", "n", "off" -> false
-                    else -> throw BadParameterValue("$it is not a valid boolean", this)
+                    else -> throw BadParameterValue(context.localization.boolConversionError(it), this)
                 }
             },
             transformAll = {
                 if (it.isEmpty()) default else it.last() !in secondaryNames
             },
-            validator = {})
+            validator = {}
+    )
+}
+
+/**
+ * Set the help for this option.
+ *
+ * Although you would normally pass the help string as an argument to [option], this function
+ * can be more convenient for long help strings.
+ *
+ * ### Example:
+ *
+ * ```
+ * val number by option()
+ *      .flag()
+ *      .help("This option is a flag")
+ * ```
+ */
+fun <T> FlagOption<T>.help(help: String): FlagOption<T> {
+    return copy(help = help)
+}
+
+/**
+ * Convert the option's value type.
+ *
+ * The [conversion] is called once with the final value of the option. If any errors are thrown,
+ * they are caught and a [BadParameterValue] is thrown with the error message. You can call
+ * [fail][OptionTransformContext.fail] to throw a [BadParameterValue] manually.
+ *
+ * ## Example
+ *
+ * ```
+ * val loud by option().flag().convert { if (it) Volume.Loud else Volume.Soft }
+ * ```
+ */
+inline fun <InT, OutT> FlagOption<InT>.convert(crossinline conversion: FlagConverter<InT, OutT>): FlagOption<OutT> {
+    val envTransform: OptionTransformContext.(String) -> OutT = {
+        val orig = transformEnvvar(it)
+        try {
+            conversion(orig)
+        } catch (err: UsageError) {
+            throw err
+        } catch (err: Exception) {
+            fail(err.message ?: "")
+        }
+    }
+    val allTransform: OptionTransformContext.(List<String>) -> OutT = {
+        val orig = transformAll(it)
+        try {
+            conversion(orig)
+        } catch (err: UsageError) {
+            throw err
+        } catch (err: Exception) {
+            fail(err.message ?: "")
+        }
+    }
+    return copy(
+            transformEnvvar = envTransform,
+            transformAll = allTransform,
+            validator = {}
+    )
 }
 
 /**
  * Turn an option into a flag that counts the number of times the option occurs on the command line.
  */
 fun RawOption.counted(): FlagOption<Int> {
-    return FlagOption(names, emptySet(), help, hidden, helpTags, envvar,
-            transformEnvvar = { valueToInt(it) },
+    return FlagOption(
+            names = names,
+            secondaryNames = emptySet(),
+            optionHelp = optionHelp,
+            hidden = hidden,
+            helpTags = helpTags,
+            valueSourceKey = valueSourceKey,
+            envvar = envvar,
+            transformEnvvar = { valueToInt(context, it) },
             transformAll = { it.size },
-            validator = {})
+            validator = {}
+    )
 }
 
 /**
@@ -152,9 +254,16 @@ fun RawOption.counted(): FlagOption<Int> {
  */
 fun <T : Any> RawOption.switch(choices: Map<String, T>): FlagOption<T?> {
     require(choices.isNotEmpty()) { "Must specify at least one choice" }
-    return FlagOption(choices.keys, emptySet(), help, hidden, helpTags, null,
+    return FlagOption(
+            names = choices.keys,
+            secondaryNames = emptySet(),
+            optionHelp = optionHelp,
+            hidden = hidden,
+            helpTags = helpTags,
+            valueSourceKey = null,
+            envvar = null,
             transformEnvvar = {
-                throw UsageError("environment variables not supported for switch options", this)
+                throw UsageError(context.localization.switchOptionEnvvar(), this)
             },
             transformAll = { names -> names.map { choices.getValue(it) }.lastOrNull() },
             validator = {}
@@ -182,12 +291,49 @@ fun <T : Any> FlagOption<T?>.default(
         value: T,
         defaultForHelp: String = value.toString()
 ): FlagOption<T> {
-    val tags = helpTags + mapOf(HelpFormatter.Tags.DEFAULT to defaultForHelp)
     return copy(
             transformEnvvar = { transformEnvvar(it) ?: value },
             transformAll = { transformAll(it) ?: value },
             validator = validator,
-            helpTags = tags
+            helpTags = helpTags + mapOf(HelpFormatter.Tags.DEFAULT to defaultForHelp)
+    )
+}
+
+/**
+ * Set a default [value] for an option from a lazy builder which is only called if the default value is used.
+ *
+ * @param defaultForHelp The help text for this option's default value if the help formatter is configured
+ *   to show them. By default, the default value is not shown in help.
+ */
+inline fun <T : Any> FlagOption<T?>.defaultLazy(
+        defaultForHelp: String = "",
+        crossinline value: () -> T
+):  FlagOption<T> {
+    return copy(
+            transformEnvvar = { transformEnvvar(it) ?: value() },
+            transformAll = { transformAll(it) ?: value() },
+            validator = validator,
+            helpTags = helpTags + mapOf(HelpFormatter.Tags.DEFAULT to defaultForHelp)
+    )
+}
+
+/**
+ * If the option is not called on the command line (and is not set in an envvar), throw a [MissingOption].
+ *
+ * This must be applied after all other transforms.
+ *
+ * ### Example:
+ *
+ * ```
+ * option().switch("--foo" to Foo(), "--bar" to Bar()).required()
+ * ```
+ */
+fun <T : Any> FlagOption<T?>.required(): FlagOption<T> {
+    return copy(
+            transformEnvvar = { transformEnvvar(it) ?: throw MissingOption(option) },
+            transformAll = { transformAll(it) ?: throw MissingOption(option) },
+            validator = validator,
+            helpTags = helpTags + mapOf(HelpFormatter.Tags.REQUIRED to "")
     )
 }
 

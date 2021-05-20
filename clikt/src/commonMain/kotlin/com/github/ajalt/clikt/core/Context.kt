@@ -1,14 +1,9 @@
 package com.github.ajalt.clikt.core
 
-import com.github.ajalt.clikt.output.CliktConsole
-import com.github.ajalt.clikt.output.CliktHelpFormatter
-import com.github.ajalt.clikt.output.HelpFormatter
-import com.github.ajalt.clikt.output.defaultCliktConsole
+import com.github.ajalt.clikt.output.*
 import com.github.ajalt.clikt.sources.ChainedValueSource
-import com.github.ajalt.clikt.sources.ExperimentalValueSourceApi
 import com.github.ajalt.clikt.sources.ValueSource
 import kotlin.properties.ReadOnlyProperty
-import kotlin.reflect.KProperty
 
 typealias TypoSuggestor = (enteredValue: String, possibleValues: List<String>) -> List<String>
 
@@ -28,7 +23,6 @@ typealias TypoSuggestor = (enteredValue: String, possibleValues: List<String>) -
  * @property helpOptionNames The names to use for the help option. If any names in the set conflict with other
  *   options, the conflicting name will not be used for the help option. If the set is empty, or contains no
  *   unique names, no help option will be added.
- * @property helpOptionMessage The description of the help option.
  * @property helpFormatter The help formatter for this command.
  * @property tokenTransformer An optional transformation function that is called to transform command line
  *   tokens (options and commands) before parsing. This can be used to implement e.g. case insensitive
@@ -40,7 +34,6 @@ typealias TypoSuggestor = (enteredValue: String, possibleValues: List<String>) -
  *   subcommand name. It takes the entered name and a list of all registered names option/subcommand
  *   names and filters the list down to values to suggest to the user.
  */
-@OptIn(ExperimentalValueSourceApi::class)
 class Context(
         val parent: Context?,
         val command: CliktCommand,
@@ -48,14 +41,14 @@ class Context(
         val autoEnvvarPrefix: String?,
         val printExtraMessages: Boolean,
         val helpOptionNames: Set<String>,
-        val helpOptionMessage: String,
         val helpFormatter: HelpFormatter,
         val tokenTransformer: Context.(String) -> String,
         val console: CliktConsole,
         val expandArgumentFiles: Boolean,
         val readEnvvarBeforeValueSource: Boolean,
         val valueSource: ValueSource?,
-        val correctionSuggestor: TypoSuggestor
+        val correctionSuggestor: TypoSuggestor,
+        val localization: Localization
 ) {
     var invokedSubcommand: CliktCommand? = null
         internal set
@@ -66,15 +59,9 @@ class Context(
         return ancestors().mapNotNull { it.obj as? T }.firstOrNull()
     }
 
-    @Suppress("unused")
-    @Deprecated("This overload has been renamed findOrSetObject", replaceWith = ReplaceWith("findOrSetObject(defaultValue)"))
-    inline fun <reified T : Any> findObject(defaultValue: () -> T): T {
-        return findOrSetObject(defaultValue)
-    }
-
     /** Find the closest object of type [T], setting `this.`[obj] if one is not found. */
     inline fun <reified T : Any> findOrSetObject(defaultValue: () -> T): T {
-        return findObject<T>() ?: defaultValue().also { obj = it }
+        return findObject() ?: defaultValue().also { obj = it }
     }
 
     /** Find the outermost context */
@@ -126,11 +113,8 @@ class Context(
          */
         var helpOptionNames: Set<String> = parent?.helpOptionNames ?: setOf("-h", "--help")
 
-        /** The description of the help option.*/
-        var helpOptionMessage: String = parent?.helpOptionMessage ?: "Show this message and exit"
-
-        /** The help formatter for this command*/
-        var helpFormatter: HelpFormatter = parent?.helpFormatter ?: CliktHelpFormatter()
+        /** The help formatter for this command, or null to use the default */
+        var helpFormatter: HelpFormatter? = parent?.helpFormatter
 
         /** An optional transformation function that is called to transform command line */
         var tokenTransformer: Context.(String) -> String = parent?.tokenTransformer ?: { it }
@@ -142,7 +126,7 @@ class Context(
          * prefix, envvar lookup is disabled.
          */
         var autoEnvvarPrefix: String? = parent?.autoEnvvarPrefix?.let {
-            it + "_" + command.commandName.replace(Regex("\\W"), "_").toUpperCase()
+            it + "_" + command.commandName.replace(Regex("\\W"), "_").uppercase()
         }
 
         /**
@@ -170,7 +154,6 @@ class Context(
          *
          * You can set multiple sources with [valueSources]
          */
-        @ExperimentalValueSourceApi
         var valueSource: ValueSource? = parent?.valueSource
 
         /**
@@ -179,7 +162,6 @@ class Context(
          * Values are read from the first source, then if it doesn't return a value, later sources
          * are read successively until one returns a value or all sources have been read.
          */
-        @ExperimentalValueSourceApi
         fun valueSources(vararg sources: ValueSource) {
             valueSource = ChainedValueSource(sources.toList())
         }
@@ -190,6 +172,11 @@ class Context(
          * names and filters the list down to values to suggest to the user.
          */
         var correctionSuggestor: TypoSuggestor = DEFAULT_CORRECTION_SUGGESTOR
+
+        /**
+         * Localized strings to use for help output and error reporting.
+         */
+        var localization: Localization = defaultLocalization
     }
 
     companion object {
@@ -198,10 +185,11 @@ class Context(
                 block()
                 val interspersed = allowInterspersedArgs && !command.allowMultipleSubcommands &&
                         parent?.let { p -> p.ancestors().any { it.command.allowMultipleSubcommands } } != true
+                val formatter = helpFormatter ?: CliktHelpFormatter(localization)
                 return Context(
                         parent, command, interspersed, autoEnvvarPrefix, printExtraMessages,
-                        helpOptionNames, helpOptionMessage, helpFormatter, tokenTransformer, console,
-                        expandArgumentFiles, readEnvvarBeforeValueSource, valueSource, correctionSuggestor
+                        helpOptionNames, formatter, tokenTransformer, console, expandArgumentFiles,
+                        readEnvvarBeforeValueSource, valueSource, correctionSuggestor, localization
                 )
             }
         }
@@ -211,27 +199,13 @@ class Context(
 /** Find the closest object of type [T], or throw a [NullPointerException] */
 @Suppress("unused") // these extensions don't use their receiver, but we want to limit where they can be called
 inline fun <reified T : Any> CliktCommand.requireObject(): ReadOnlyProperty<CliktCommand, T> {
-    return object : ReadOnlyProperty<CliktCommand, T> {
-        override fun getValue(thisRef: CliktCommand, property: KProperty<*>): T {
-            return thisRef.currentContext.findObject<T>()!!
-        }
-    }
+    return ReadOnlyProperty<CliktCommand, T> { thisRef, _ -> thisRef.currentContext.findObject<T>()!! }
 }
 
 /** Find the closest object of type [T], or null */
 @Suppress("unused")
 inline fun <reified T : Any> CliktCommand.findObject(): ReadOnlyProperty<CliktCommand, T?> {
-    return object : ReadOnlyProperty<CliktCommand, T?> {
-        override fun getValue(thisRef: CliktCommand, property: KProperty<*>): T? {
-            return thisRef.currentContext.findObject<T>()
-        }
-    }
-}
-
-@Suppress("unused")
-@Deprecated("This overload has been renamed findOrSetObject", replaceWith = ReplaceWith("findOrSetObject(default)"))
-inline fun <reified T : Any> CliktCommand.findObject(crossinline default: () -> T): ReadOnlyProperty<CliktCommand, T> {
-    return findOrSetObject(default)
+    return ReadOnlyProperty { thisRef, _ -> thisRef.currentContext.findObject<T>() }
 }
 
 /**
@@ -244,11 +218,7 @@ inline fun <reified T : Any> CliktCommand.findObject(crossinline default: () -> 
  */
 @Suppress("unused")
 inline fun <reified T : Any> CliktCommand.findOrSetObject(crossinline default: () -> T): ReadOnlyProperty<CliktCommand, T> {
-    return object : ReadOnlyProperty<CliktCommand, T> {
-        override fun getValue(thisRef: CliktCommand, property: KProperty<*>): T {
-            return thisRef.currentContext.findOrSetObject(default)
-        }
-    }
+    return ReadOnlyProperty { thisRef, _ -> thisRef.currentContext.findOrSetObject(default) }
 }
 
 private val DEFAULT_CORRECTION_SUGGESTOR: TypoSuggestor = { enteredValue, possibleValues ->

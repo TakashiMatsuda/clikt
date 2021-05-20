@@ -6,7 +6,7 @@ Installation instructions can be found in the [README][README].
 ## Basic Concepts
 
 Clikt command line interfaces are created by using property delegates
-inside of a [CliktCommmand][CliktCommmand]. The normal way to use Clikt is to forward
+inside of a [CliktCommand][CliktCommand]. The normal way to use Clikt is to forward
 `argv` from your `main` function to [CliktCommand.main][main].
 
 The simplest command with no parameters would look like this:
@@ -54,44 +54,47 @@ Instances of any command can be attached to other commands, allowing
 arbitrary nesting of commands. For example, you could write a script to
 manage a database:
 
-```kotlin tab="Example"
-class Database: CliktCommand() {
-    override fun run() = Unit
-}
-
-class Init: CliktCommand(help="Initialize the database") {
-    override fun run() {
-        echo("Initialized the database.")
+=== "Example"
+    ```kotlin
+    class Database: CliktCommand() {
+        override fun run() = Unit
     }
-}
 
-class Drop: CliktCommand(help="Drop the database") {
-    override fun run() {
-        echo("Dropped the database.")
+    class Init: CliktCommand(help="Initialize the database") {
+        override fun run() {
+            echo("Initialized the database.")
+        }
     }
-}
 
-fun main(args: Array<String>) = Database()
-        .subcommands(Init(), Drop())
-        .main(args)
-```
+    class Drop: CliktCommand(help="Drop the database") {
+        override fun run() {
+            echo("Dropped the database.")
+        }
+    }
 
-```text tab="Usage"
-$ ./db init
-Initialized the database.
-```
+    fun main(args: Array<String>) = Database()
+            .subcommands(Init(), Drop())
+            .main(args)
+    ```
 
-```text tab="Help Output"
-$ ./db --help
-Usage: database [OPTIONS] COMMAND [ARGS]...
+=== "Usage"
+    ```text
+    $ ./db init
+    Initialized the database.
+    ```
 
-Options:
-  -h, --help  Show this message and exit
+=== "Help Output"
+    ```text
+    $ ./db --help
+    Usage: database [OPTIONS] COMMAND [ARGS]...
 
-Commands:
-  init  Initialize the database
-  drop  Drop the database
-```
+    Options:
+      -h, --help  Show this message and exit
+
+    Commands:
+      init  Initialize the database
+      drop  Drop the database
+    ```
 
 
 ## Adding Parameters
@@ -99,27 +102,29 @@ Commands:
 To add parameters, use the [option][option] and [argument][argument] property
 delegates:
 
-```kotlin tab="Example"
-class Hello : CliktCommand() {
-    val count by option(help="Number of greetings").int().default(1)
-    val name by argument()
+=== "Example"
+    ```kotlin
+    class Hello : CliktCommand() {
+        val count by option(help="Number of greetings").int().default(1)
+        val name by argument()
 
-    override fun run() {
-        for (i in 1..count) {
-            echo("Hello $name!")
+        override fun run() {
+            for (i in 1..count) {
+                echo("Hello $name!")
+            }
         }
     }
-}
-```
+    ```
 
-```text tab="Help Output"
-$ ./hello --help
-Usage: hello [OPTIONS] USERNAME
+=== "Help Output"
+    ```text
+    $ ./hello --help
+    Usage: hello [OPTIONS] USERNAME
 
-Options:
-  --count INT  Number of greetings
-  -h, --help   Show this message and exit
-```
+    Options:
+      --count INT  Number of greetings
+      -h, --help   Show this message and exit
+    ```
 
 ## Developing Command Line Applications With Gradle
 
@@ -146,12 +151,12 @@ build folder, which you can then execute normally. See Clikt's
 
 
 [application_plugin]: https://docs.gradle.org/current/userguide/application_plugin.html
-[argument]:           api/clikt/com.github.ajalt.clikt.parameters.arguments/argument.md
+[argument]:           api/clikt/com.github.ajalt.clikt.parameters.arguments/argument.html
 [clikt-samples]:      https://github.com/ajalt/clikt/tree/master/samples
-[CliktCommmand]:      api/clikt/com.github.ajalt.clikt.core/-clikt-command/index.md
-[echo]:               api/clikt/com.github.ajalt.clikt.output/-term-ui/echo.md
-[main]:               api/clikt/com.github.ajalt.clikt.core/-clikt-command/main.md
-[option]:             api/clikt/com.github.ajalt.clikt.parameters.options/option.md
+[CliktCommand]:       api/clikt/com.github.ajalt.clikt.core/-clikt-command/index.html
+[echo]:               api/clikt/com.github.ajalt.clikt.output/-term-ui/echo.html
+[main]:               api/clikt/com.github.ajalt.clikt.core/-clikt-command/main.html
+[option]:             api/clikt/com.github.ajalt.clikt.parameters.options/option.html
 [println]:            https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.io/println.html
 [README]:             https://github.com/ajalt/clikt
 [runsample]:          https://github.com/ajalt/clikt/blob/master/runsample

@@ -1,7 +1,7 @@
 package com.github.ajalt.clikt.parameters.types
 
 import com.github.ajalt.clikt.completion.CompletionCandidates
-import com.github.ajalt.clikt.output.TermUi
+import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.parameters.arguments.ProcessedArgument
 import com.github.ajalt.clikt.parameters.arguments.RawArgument
 import com.github.ajalt.clikt.parameters.arguments.convert
@@ -13,10 +13,10 @@ import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Path
 
-private fun pathType(fileOkay: Boolean, folderOkay: Boolean): String = when {
-    fileOkay && !folderOkay -> "File"
-    !fileOkay && folderOkay -> "Directory"
-    else -> "Path"
+private fun pathType(context: Context, fileOkay: Boolean, folderOkay: Boolean): String = when {
+    fileOkay && !folderOkay -> context.localization.pathTypeFile()
+    !fileOkay && folderOkay -> context.localization.pathTypeDirectory()
+    else -> context.localization.pathTypeOther()
 }
 
 internal fun convertToPath(
@@ -28,51 +28,20 @@ internal fun convertToPath(
         mustBeReadable: Boolean,
         canBeSymlink: Boolean,
         fileSystem: FileSystem,
+        context: Context,
         fail: (String) -> Unit
 ): Path {
-    val name = pathType(canBeFile, canBeFolder)
-    return fileSystem.getPath(path).also {
-        if (mustExist && !Files.exists(it)) fail("$name \"$it\" does not exist.")
-        if (!canBeFile && Files.isRegularFile(it)) fail("$name \"$it\" is a file.")
-        if (!canBeFolder && Files.isDirectory(it)) fail("$name \"$it\" is a directory.")
-        if (mustBeWritable && !Files.isWritable(it)) fail("$name \"$it\" is not writable.")
-        if (mustBeReadable && !Files.isReadable(it)) fail("$name \"$it\" is not readable.")
-        if (!canBeSymlink && Files.isSymbolicLink(it)) fail("$name \"$it\" is a symlink.")
+    val name = pathType(context, canBeFile, canBeFolder)
+    return with(context.localization) {
+        fileSystem.getPath(path).also {
+            if (mustExist && !Files.exists(it)) fail(pathDoesNotExist(name, it.toString()))
+            if (!canBeFile && Files.isRegularFile(it)) fail(pathIsFile(name, it.toString()))
+            if (!canBeFolder && Files.isDirectory(it)) fail(pathIsDirectory(name, it.toString()))
+            if (mustBeWritable && !Files.isWritable(it)) fail(pathIsNotWritable(name, it.toString()))
+            if (mustBeReadable && !Files.isReadable(it)) fail(pathIsNotReadable(name, it.toString()))
+            if (!canBeSymlink && Files.isSymbolicLink(it)) fail(pathIsSymlink(name, it.toString()))
+        }
     }
-}
-
-//<editor-fold desc="arguments">
-
-// This overload exists so that calls to `file()` aren't marked as deprecated.
-// Remove once the deprecated function is removed.
-/**
- * Convert the argument to a [Path].
- *
- * @param mustExist If true, fail if the given path does not exist
- * @param canBeFile If false, fail if the given path is a file
- * @param canBeDir If false, fail if the given path is a directory
- * @param mustBeWritable If true, fail if the given path is not writable
- * @param mustBeReadable If true, fail if the given path is not readable
- * @param fileSystem The [FileSystem] with which to resolve paths
- * @param canBeSymlink If false, fail if the given path is a symlink
- */
-@Suppress("KDocUnresolvedReference")
-fun RawArgument.path(fileSystem: FileSystem = FileSystems.getDefault()): ProcessedArgument<Path, Path> {
-    return path(mustExist = false, fileSystem = fileSystem)
-}
-
-@Deprecated("Parameters have been renamed. All arguments must be called by name to remove this warning.", ReplaceWith(
-        "this.path(mustExist=exists, canBeFile=fileOkay, canBeDir=folderOkay, mustBeWritable=writable, mustBeReadable=readable, fileSystem=fileSystem)"
-))
-fun RawArgument.path(
-        exists: Boolean = false,
-        fileOkay: Boolean = true,
-        folderOkay: Boolean = true,
-        writable: Boolean = false,
-        readable: Boolean = false,
-        fileSystem: FileSystem = FileSystems.getDefault()
-): ProcessedArgument<Path, Path> {
-    return path(exists, fileOkay, folderOkay, writable, readable, true, fileSystem)
 }
 
 /**
@@ -96,43 +65,8 @@ fun RawArgument.path(
         fileSystem: FileSystem = FileSystems.getDefault()
 ): ProcessedArgument<Path, Path> {
     return convert(completionCandidates = CompletionCandidates.Path) { str ->
-        convertToPath(str, mustExist, canBeFile, canBeDir, mustBeWritable, mustBeReadable, canBeSymlink, fileSystem) { fail(it) }
+        convertToPath(str, mustExist, canBeFile, canBeDir, mustBeWritable, mustBeReadable, canBeSymlink, fileSystem, context) { fail(it) }
     }
-}
-
-//</editor-fold>
-//<editor-fold desc="options">
-
-// This overload exists so that calls to `file()` aren't marked as deprecated.
-// Remove once the deprecated function is removed.
-/**
- * Convert the option to a [Path].
- *
- * @param mustExist If true, fail if the given path does not exist
- * @param canBeFile If false, fail if the given path is a file
- * @param canBeDir If false, fail if the given path is a directory
- * @param mustBeWritable If true, fail if the given path is not writable
- * @param mustBeReadable If true, fail if the given path is not readable
- * @param fileSystem The [FileSystem] with which to resolve paths.
- * @param canBeSymlink If false, fail if the given path is a symlink
- */
-@Suppress("KDocUnresolvedReference")
-fun RawOption.path(fileSystem: FileSystem = FileSystems.getDefault()): NullableOption<Path, Path> {
-    return path(mustExist = false, fileSystem = fileSystem)
-}
-
-@Deprecated("Parameters have been renamed. All arguments must be called by name to remove this warning.", ReplaceWith(
-        "this.path(mustExist=exists, canBeFile=fileOkay, canBeDir=folderOkay, mustBeWritable=writable, mustBeReadable=readable, fileSystem=fileSystem)"
-))
-fun RawOption.path(
-        exists: Boolean = false,
-        fileOkay: Boolean = true,
-        folderOkay: Boolean = true,
-        writable: Boolean = false,
-        readable: Boolean = false,
-        fileSystem: FileSystem = FileSystems.getDefault()
-): NullableOption<Path, Path> {
-    return path(exists, fileOkay, folderOkay, writable, readable, true, fileSystem)
 }
 
 /**
@@ -155,10 +89,7 @@ fun RawOption.path(
         canBeSymlink: Boolean = true,
         fileSystem: FileSystem = FileSystems.getDefault()
 ): NullableOption<Path, Path> {
-    val name = pathType(canBeFile, canBeDir)
-    val split = if (TermUi.isWindows) Regex.fromLiteral(";") else Regex.fromLiteral(":")
-    return convert(name.toUpperCase(), envvarSplit = split, completionCandidates = CompletionCandidates.Path) { str ->
-        convertToPath(str, mustExist, canBeFile, canBeDir, mustBeWritable, mustBeReadable, canBeSymlink, fileSystem) { fail(it) }
+    return convert({ localization.pathMetavar() }, CompletionCandidates.Path) { str ->
+        convertToPath(str, mustExist, canBeFile, canBeDir, mustBeWritable, mustBeReadable, canBeSymlink, fileSystem, context) { fail(it) }
     }
 }
-//</editor-fold>

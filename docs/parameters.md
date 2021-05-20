@@ -27,24 +27,26 @@ case of arguments) from the name of the property. You can also specify
 the names manually. Options can have any number of names, where
 arguments only have a single metavar.
 
-```kotlin tab="Example"
-class Cli : CliktCommand() {
-    val inferredOpt by option()
-    val inferred by argument()
-    val explicitOpt by option("-e", "--explicit")
-    val explicitArg by argument("<explicit>")
-    override fun run() = Unit
-}
-```
+=== "Example"
+    ```kotlin
+    class Cli : CliktCommand() {
+        val inferredOpt by option()
+        val inferred by argument()
+        val explicitOpt by option("-e", "--explicit")
+        val explicitArg by argument("<explicit>")
+        override fun run() = Unit
+    }
+    ```
 
-```text tab="Help Output"
-Usage: cli [OPTIONS] INFERRED <explicit>
+=== "Help Output"
+    ```text
+    Usage: cli [OPTIONS] INFERRED <explicit>
 
-Options:
-  --inferred-opt TEXT
-  -e, --explicit TEXT
-  -h, --help           Show this message and exit
-```
+    Options:
+      --inferred-opt TEXT
+      -e, --explicit TEXT
+      -h, --help           Show this message and exit
+    ```
 
 ## Parameter Types
 
@@ -143,6 +145,9 @@ reading or writing. They support the unix convention of passing `-` to specify s
 rather than a file on the filesystem. You'll need to close the streams yourself. You can also use
 [stdin][defaultStdin] or [stdout][defaultStdout] as their default values.
 
+If you need to check if one of these streams is pointing to a file rather than stdin or stdout, you
+can use [`isCliktParameterDefaultStdin`][isStdin] or [`isCliktParameterDefaultStdout`][isStdout].
+
 ## Custom Types
 
 You can convert parameter values to a custom type by using
@@ -158,24 +163,27 @@ raising an exception.
 
 For example, you can create an option of type `BigDecimal` like this:
 
-```kotlin tab="Example"
-class Cli: CliktCommand() {
-    val opt by option().convert { it.toBigDecimal() }
-    override fun run() = echo("opt=$opt")
-}
-```
+=== "Example"
+    ```kotlin
+    class Cli: CliktCommand() {
+        val opt by option().convert { it.toBigDecimal() }
+        override fun run() = echo("opt=$opt")
+    }
+    ```
 
-```text tab="Usage 1"
-$ ./cli --opt=1.5
-opt=1.5
-```
+=== "Usage 1"
+    ```text
+    $ ./cli --opt=1.5
+    opt=1.5
+    ```
 
-```text tab="Usage 2"
-$ ./cli --opt=foo
-Usage: cli [OPTIONS]
+=== "Usage 2"
+    ```text
+    $ ./cli --opt=foo
+    Usage: cli [OPTIONS]
 
-Error: Invalid value for "--opt": For input string: "foo"
-```
+    Error: Invalid value for "--opt": For input string: "foo"
+    ```
 
 ### Metavars
 
@@ -183,110 +191,161 @@ You can also pass [`option().convert()`][convert] a metavar
 that will be printed in the help page instead of the default of `VALUE`.
 We can modify the above example to use a metavar and an explicit error message:
 
-```kotlin tab="Example"
-class Cli: CliktCommand() {
-    val opt by option(help="a real number").convert("FLOAT") {
-        it.toBigDecimalOrNull() ?: fail("A real number is required")
+=== "Example"
+    ```kotlin
+    class Cli: CliktCommand() {
+        val opt by option(help="a real number").convert("FLOAT") {
+            it.toBigDecimalOrNull() ?: fail("A real number is required")
+        }
+        override fun run() = echo("opt=$opt")
     }
-    override fun run() = echo("opt=$opt")
-}
-```
+    ```
 
-```text tab="Usage 1"
-$ ./cli --opt=foo
-Usage: cli [OPTIONS]
+=== "Usage 1"
+    ```text
+    $ ./cli --opt=foo
+    Usage: cli [OPTIONS]
 
-Error: Invalid value for "--opt": A real number is required
-```
+    Error: Invalid value for "--opt": A real number is required
+    ```
 
-```text tab="Usage 2"
-$ ./cli --help
-Usage: cli [OPTIONS]
+=== "Usage 2"
+    ```text
+    $ ./cli --help
+    Usage: cli [OPTIONS]
 
-Options:
-  --opt FLOAT  a real number
-  -h, --help   Show this message and exit
-```
+    Options:
+      --opt FLOAT  a real number
+      -h, --help   Show this message and exit
+    ```
 
 ### Chaining
 
 You can call `convert` more than once on the same parameter. This allows you to reuse existing
 conversion functions. For example, you could automatically read the text of a file parameter.
 
-```kotlin tab="Example"
-class FileReader: CliktCommand() {
-    val file: String by argument()
-        .file(mustExist=true, canBeDir=false)
-        .convert { it.readText() }
-    override fun run() {
-        echo("Your file contents: $file")
+=== "Example"
+    ```kotlin
+    class FileReader: CliktCommand() {
+        val file: String by argument()
+            .file(mustExist=true, canBeDir=false)
+            .convert { it.readText() }
+        override fun run() {
+            echo("Your file contents: $file")
+        }
     }
-}
-```
+    ```
 
-```text tab="Usage"
-$ echo 'some text' > myfile.txt
-$ ./filereader ./myfile.txt
-Your file contents: some text
-```
+=== "Usage"
+    ```text
+    $ echo 'some text' > myfile.txt
+    $ ./filereader ./myfile.txt
+    Your file contents: some text
+    ```
 
 ## Parameter Validation
 
 After converting a value to a new type, you can perform additional validation on the converted value
-with [`option().validate()`][validate] and [`argument().validate()`][validate].
-`validate` takes a lambda that returns nothing, but can call `fail("error message")` if the value is
-invalid. You can also call `require()`, which will fail if the provided expression is false. The
-lambda is only called if the value is non-null.
+with [`check()`][checkOpt] and [`validate()`][validateOpt] (or the [argument][checkArg]
+[equivalents][validateArg]).
 
-```kotlin
-val opt by option().int().validate {
-    require(it % 2 == 0) { "value must be even" }
-}
-```
+### `check()`
+
+[`check()`][checkOpt] is similar the stdlib function of the [same name][checkKotlin]: it takes
+lambda that returns a boolean to indicate if the parameter value is valid or not, and reports an
+error if it returns false. The lambda is only called if the parameter value is non-null.
+
+=== "Example"
+    ```kotlin
+    class Tool : CliktCommand() {
+        val number by option(help = "An even number").int()
+                .check("value must be even") { it % 2 == 0 }
+
+        override fun run() {
+            echo("number=$number")
+        }
+    }
+    ```
+
+=== "Usage 1"
+    ```text
+    $ ./tool --number=2
+    number=2
+    ```
+
+=== "Usage 2"
+    ```text
+    $ ./tool
+    number=null
+    ```
+
+=== "Usage 3"
+    ```text
+    $ ./tool --number=1
+    Usage: tool [OPTIONS]
+
+    Error: invalid value for --number: value must be even
+    ```
+
+### `validate()`
+
+For more complex validation, you can use [`validate()`][validateOpt]. This function takes a lambda
+that returns nothing, but can call `fail("error message")` if the value is invalid. You can also
+call `require()`, which will fail if the provided expression is false. Like `check`, the lambda is
+only called if the value is non-null.
 
 The lambdas you pass to `validate` are called after the values for all options and arguments have
 been set, so (unlike in transforms) you can reference other parameters:
 
-```kotlin tab="Example"
-class Tool : CliktCommand() {
-    val number by option().int().default(0)
-    val biggerNumber by option().int().validate {
-        require(it > number) {
-            "--bigger-number must be bigger than --number"
+=== "Example"
+    ```kotlin
+    class Tool : CliktCommand() {
+        val number by option().int().default(0)
+        val biggerNumber by option().int().validate {
+            require(it > number) {
+                "--bigger-number must be bigger than --number"
+            }
+        }
+
+        override fun run() {
+            echo("number=$number, biggerNumber=$biggerNumber")
         }
     }
+    ```
 
-    override fun run() {
-        echo("number=$number, biggerNumber=$biggerNumber")
-    }
-}
-```
+=== "Usage 1"
+    ```text
+    $ ./tool --number=1
+    number=1, biggerNumber=null
+    ```
 
-```text tab="Usage 1"
-$ ./tool --number=1
-number=1, biggerNumber=null
-```
+=== "Usage 2"
+    ```text
+    $ ./tool --number=1 --bigger-number=0
+    Usage: tool [OPTIONS]
 
-```text tab="Usage 2"
-$ ./tool --number=1 --bigger-number=0
-Usage: tool [OPTIONS]
-
-Error: --bigger-number must be bigger than --number
-```
+    Error: --bigger-number must be bigger than --number
+    ```
 
 
-[choice]:         api/clikt/com.github.ajalt.clikt.parameters.types/choice.md
-[convert]:        api/clikt/com.github.ajalt.clikt.parameters.options/convert.md
-[defaultStdin]:   api/clikt/com.github.ajalt.clikt.parameters.types/default-stdin.md
-[defaultStdout]:  api/clikt/com.github.ajalt.clikt.parameters.types/default-stdout.md
-[double]:         api/clikt/com.github.ajalt.clikt.parameters.types/double.md
-[enum]:           api/clikt/com.github.ajalt.clikt.parameters.types/enum.md
-[file]:           api/clikt/com.github.ajalt.clikt.parameters.types/file.md
-[float]:          api/clikt/com.github.ajalt.clikt.parameters.types/float.md
-[inputStream]:    api/clikt/com.github.ajalt.clikt.parameters.types/input-stream.md
-[int]:            api/clikt/com.github.ajalt.clikt.parameters.types/int.md
-[long]:           api/clikt/com.github.ajalt.clikt.parameters.types/long.md
-[outputStream]:   api/clikt/com.github.ajalt.clikt.parameters.types/output-stream.md
-[path]:           api/clikt/com.github.ajalt.clikt.parameters.types/path.md
-[restrictTo]:     api/clikt/com.github.ajalt.clikt.parameters.types/restrict-to.md
-[validate]:       api/clikt/com.github.ajalt.clikt.parameters.options/validate.md
+[checkArg]:       api/clikt/com.github.ajalt.clikt.parameters.options/check.html
+[checkKotlin]:    https://kotlinlang.org/api/latest/jvm/stdlib/kotlin/check.html
+[checkOpt]:       api/clikt/com.github.ajalt.clikt.parameters.options/check.html
+[choice]:         api/clikt/com.github.ajalt.clikt.parameters.types/choice.html
+[convert]:        api/clikt/com.github.ajalt.clikt.parameters.options/convert.html
+[defaultStdin]:   api/clikt/com.github.ajalt.clikt.parameters.types/default-stdin.html
+[defaultStdout]:  api/clikt/com.github.ajalt.clikt.parameters.types/default-stdout.html
+[double]:         api/clikt/com.github.ajalt.clikt.parameters.types/double.html
+[enum]:           api/clikt/com.github.ajalt.clikt.parameters.types/enum.html
+[file]:           api/clikt/com.github.ajalt.clikt.parameters.types/file.html
+[float]:          api/clikt/com.github.ajalt.clikt.parameters.types/float.html
+[inputStream]:    api/clikt/com.github.ajalt.clikt.parameters.types/input-stream.html
+[int]:            api/clikt/com.github.ajalt.clikt.parameters.types/int.html
+[isStdin]:        api/clikt/com.github.ajalt.clikt.parameters.types/is-clikt-parameter-default-stdin.html
+[isStdout]:       api/clikt/com.github.ajalt.clikt.parameters.types/is-clikt-parameter-default-stdout.html
+[long]:           api/clikt/com.github.ajalt.clikt.parameters.types/long.html
+[outputStream]:   api/clikt/com.github.ajalt.clikt.parameters.types/output-stream.html
+[path]:           api/clikt/com.github.ajalt.clikt.parameters.types/path.html
+[restrictTo]:     api/clikt/com.github.ajalt.clikt.parameters.types/restrict-to.html
+[validateArg]:    api/clikt/com.github.ajalt.clikt.parameters.options/validate.html
+[validateOpt]:    api/clikt/com.github.ajalt.clikt.parameters.options/validate.html

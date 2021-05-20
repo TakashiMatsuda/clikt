@@ -38,7 +38,7 @@ interface Argument {
      *
      * It's usually better to leave this null and describe options in the usage line of the command instead.
      */
-    val help: String
+    val argumentHelp: String
 
     /** Extra information about this argument to pass to the help formatter. */
     val helpTags: Map<String, String>
@@ -47,7 +47,7 @@ interface Argument {
     val completionCandidates: CompletionCandidates get() = CompletionCandidates.None
 
     /** Information about this argument for the help output. */
-    val parameterHelp: ParameterHelp.Argument?
+    fun parameterHelp(context: Context): ParameterHelp.Argument?
 
     /**
      * Called after this command's argv is parsed to transform and store the argument's value.
@@ -85,7 +85,7 @@ class ArgumentTransformContext(val argument: Argument, val context: Context) : A
     fun message(message: String) = context.command.issueMessage(message)
 
     /** If [value] is false, call [fail] with the output of [lazyMessage] */
-    inline fun require(value: Boolean, lazyMessage: () -> String = { "invalid value" }) {
+    inline fun require(value: Boolean, lazyMessage: () -> String = { "" }) {
         if (!value) fail(lazyMessage())
     }
 }
@@ -109,11 +109,11 @@ typealias ArgValidator<AllT> = ArgumentTransformContext.(AllT) -> Unit
  * @property transformAll Called in [finalize] to transform the list of values to the final type.
  * @property transformValidator Called after all parameters have been [finalize]d to validate the result of [transformAll]
  */
-class ProcessedArgument<AllT, ValueT>(
+class ProcessedArgument<AllT, ValueT> internal constructor(
         name: String,
         override val nvalues: Int,
         override val required: Boolean,
-        override val help: String,
+        override val argumentHelp: String,
         override val helpTags: Map<String, String>,
         val completionCandidatesWithDefault: ValueWithDefault<CompletionCandidates>,
         val transformValue: ArgValueTransformer<ValueT>,
@@ -131,14 +131,13 @@ class ProcessedArgument<AllT, ValueT>(
     override val completionCandidates: CompletionCandidates
         get() = completionCandidatesWithDefault.value
 
-    override val parameterHelp
-        get() = ParameterHelp.Argument(name, help, required && nvalues == 1 || nvalues > 1, nvalues < 0, helpTags)
+    override fun parameterHelp(context: Context) = ParameterHelp.Argument(name, argumentHelp, required || nvalues > 1, nvalues < 0, helpTags)
 
     override fun getValue(thisRef: CliktCommand, property: KProperty<*>): AllT = value
 
     override operator fun provideDelegate(thisRef: CliktCommand, prop: KProperty<*>):
             ReadOnlyProperty<CliktCommand, AllT> {
-        if (name.isBlank()) name = prop.name.toUpperCase().replace("-", "_")
+        if (name.isBlank()) name = prop.name.uppercase().replace("-", "_")
         thisRef.registerArgument(this)
         return this
     }
@@ -160,7 +159,7 @@ class ProcessedArgument<AllT, ValueT>(
             name: String = this.name,
             nvalues: Int = this.nvalues,
             required: Boolean = this.required,
-            help: String = this.help,
+            help: String = this.argumentHelp,
             helpTags: Map<String, String> = this.helpTags,
             completionCandidatesWithDefault: ValueWithDefault<CompletionCandidates> = this.completionCandidatesWithDefault
     ): ProcessedArgument<AllT, ValueT> {
@@ -173,7 +172,7 @@ class ProcessedArgument<AllT, ValueT>(
             name: String = this.name,
             nvalues: Int = this.nvalues,
             required: Boolean = this.required,
-            help: String = this.help,
+            help: String = this.argumentHelp,
             helpTags: Map<String, String> = this.helpTags,
             completionCandidatesWithDefault: ValueWithDefault<CompletionCandidates> = this.completionCandidatesWithDefault
     ): ProcessedArgument<AllT, ValueT> {
@@ -181,7 +180,7 @@ class ProcessedArgument<AllT, ValueT>(
     }
 }
 
-internal typealias RawArgument = ProcessedArgument<String, String>
+typealias RawArgument = ProcessedArgument<String, String>
 
 @PublishedApi
 internal fun <T : Any> defaultAllProcessor(): ArgCallsTransformer<T, T> = { it.single() }
@@ -211,13 +210,31 @@ fun CliktCommand.argument(
             name = name,
             nvalues = 1,
             required = true,
-            help = help,
+            argumentHelp = help,
             helpTags = helpTags,
             completionCandidatesWithDefault = ValueWithDefault(completionCandidates, CompletionCandidates.None),
             transformValue = { it },
             transformAll = defaultAllProcessor(),
             transformValidator = defaultValidator()
     )
+}
+
+/**
+ * Set the help for this argument.
+ *
+ * Although you would normally pass the help string as an argument to [argument], this function
+ * can be more convenient for long help strings.
+ *
+ * ### Example:
+ *
+ * ```
+ * val number by argument()
+ *      .int()
+ *      .help("This is an argument that takes a number")
+ * ```
+ */
+fun <AllT, ValueT> ProcessedArgument<AllT, ValueT>.help(help: String): ProcessedArgument<AllT, ValueT> {
+    return copy(help = help)
 }
 
 /**
@@ -392,53 +409,20 @@ inline fun <InT : Any, ValueT : Any> ProcessedArgument<InT, InT>.convert(
     )
 }
 
-@Deprecated(
-        "Cannot wrap an argument that isn't converted",
-        replaceWith = ReplaceWith("this.convert(wrapper)"),
-        level = DeprecationLevel.ERROR
-)
-@JvmName("rawWrapValue")
-@JsName("rawWrapValue")
-@Suppress("UNUSED_PARAMETER")
-fun RawArgument.wrapValue(wrapper: (String) -> Any): RawArgument = this
-
-/**
- * Wrap the argument's values after a conversion is applied.
- *
- * This can only be called on an argument after [convert] or a conversion function like [int].
- *
- * If you just want to perform checks on the value without converting it to another type, use
- * [validate] instead.
- */
-@Deprecated("Use `convert` instead", ReplaceWith("this.convert(wrapper)"))
-inline fun <T1 : Any, T2 : Any> ProcessedArgument<T1, T1>.wrapValue(
-        crossinline wrapper: (T1) -> T2
-): ProcessedArgument<T2, T2> {
-    val conv: ArgValueTransformer<T2> = {
-        try {
-            wrapper(transformValue(it))
-        } catch (err: UsageError) {
-            err.argument = argument
-            throw err
-        } catch (err: Exception) {
-            fail(err.message ?: "")
-        }
-    }
-    return copy(conv, defaultAllProcessor(), defaultValidator())
-}
-
 /**
  * Check the final argument value and raise an error if it's not valid.
  *
- * The [validator] is called with the final argument type (the output of [transformAll]), and should call
- * `fail` if the value is not valid.
+ * The [validator] is called with the final argument type (the output of [transformAll]), and should
+ * call [fail][ArgumentTransformContext.fail] if the value is not valid.
  *
- * You can also call `require` to fail automatically if an expression is false.
+ * Your [validator] can also call [require][ArgumentTransformContext.require] to fail automatically
+ * if an expression is false, or [message][ArgumentTransformContext.message] to show the user a
+ * warning message without aborting.
  *
  * ### Example:
  *
  * ```
- * val opt by argument().int().validate { require(it % 2 == 0) { "value must be even" } }
+ * val arg by argument().int().validate { require(it % 2 == 0) { "value must be even" } }
  * ```
  */
 fun <AllT : Any, ValueT> ProcessedArgument<AllT, ValueT>.validate(validator: ArgValidator<AllT>)
@@ -449,15 +433,18 @@ fun <AllT : Any, ValueT> ProcessedArgument<AllT, ValueT>.validate(validator: Arg
 /**
  * Check the final argument value and raise an error if it's not valid.
  *
- * The [validator] is called with the final argument type (the output of [transformAll]), and should call
- * `fail` if the value is not valid. It is not called if the delegate value is null.
+ * The [validator] is called with the final argument type (the output of [transformAll]), and should
+ * call [fail][ArgumentTransformContext.fail] if the value is not valid. The [validator] is not
+ * called if the delegate value is null.
  *
- * You can also call `require` to fail automatically if an expression is false.
+ * Your [validator] can also call [require][ArgumentTransformContext.require] to fail automatically
+ * if an expression is false, or [message][ArgumentTransformContext.message] to show the user a
+ * warning message without aborting.
  *
  * ### Example:
  *
  * ```
- * val opt by argument().int().validate { require(it % 2 == 0) { "value must be even" } }
+ * val arg by argument().int().validate { require(it % 2 == 0) { "value must be even" } }
  * ```
  */
 @JvmName("nullableValidate")
@@ -465,4 +452,96 @@ fun <AllT : Any, ValueT> ProcessedArgument<AllT, ValueT>.validate(validator: Arg
 fun <AllT : Any, ValueT> ProcessedArgument<AllT?, ValueT>.validate(validator: ArgValidator<AllT>)
         : ArgumentDelegate<AllT?> {
     return copy({ if (it != null) validator(it) })
+}
+
+/**
+ * Check the final argument value and raise an error if it's not valid.
+ *
+ * The [validator] is called with the final argument type (the output of [transformAll]), and should
+ * return `false` if the value is not valid. You can specify a [message] to include in the error
+ * output.
+ *
+ * You can use [validate] for more complex checks.
+ *
+ * ### Example:
+ *
+ * ```
+ * val arg by argument().int().check("value must be even") { it % 2 == 0 }
+ * ```
+ */
+inline fun <AllT : Any, ValueT> ProcessedArgument<AllT, ValueT>.check(
+        message: String,
+        crossinline validator: (AllT) -> Boolean
+): ArgumentDelegate<AllT> {
+    return check({ message }, validator)
+}
+
+/**
+ * Check the final argument value and raise an error if it's not valid.
+ *
+ * The [validator] is called with the final argument type (the output of [transformAll]), and should
+ * return `false` if the value is not valid. You can specify a [lazyMessage] the returns a message
+ * to include in the error output.
+ *
+ * You can use [validate] for more complex checks.
+ *
+ * ### Example:
+ *
+ * ```
+ * val arg by argument().int().check(lazyMessage={"$it is not even"}) { it % 2 == 0 }
+ * ```
+ */
+inline fun <AllT : Any, ValueT> ProcessedArgument<AllT, ValueT>.check(
+        crossinline lazyMessage: (AllT) -> String = { it.toString() },
+        crossinline validator: (AllT) -> Boolean
+): ArgumentDelegate<AllT> {
+    return validate { require(validator(it)) { lazyMessage(it) } }
+}
+
+/**
+ * Check the final argument value and raise an error if it's not valid.
+ *
+ * The [validator] is called with the final argument type (the output of [transformAll]), and should
+ * return `false` if the value is not valid. You can specify a [message] to include in the error
+ * output. The [validator] is not called if the delegate value is null.
+ *
+ * You can use [validate] for more complex checks.
+ *
+ * ### Example:
+ *
+ * ```
+ * val arg by argument().int().check("value must be even") { it % 2 == 0 }
+ * ```
+ */
+@JvmName("nullableCheck")
+@JsName("nullableCheck")
+inline fun <AllT : Any, ValueT> ProcessedArgument<AllT?, ValueT>.check(
+        message: String,
+        crossinline validator: (AllT) -> Boolean
+): ArgumentDelegate<AllT?> {
+    return check({ message }, validator)
+}
+
+/**
+ * Check the final argument value and raise an error if it's not valid.
+ *
+ * The [validator] is called with the final argument type (the output of [transformAll]), and should
+ * return `false` if the value is not valid. You can specify a [lazyMessage] the returns a message
+ * to include in the error output. The [validator] is not called if the delegate value is null.
+ *
+ * You can use [validate] for more complex checks.
+ *
+ * ### Example:
+ *
+ * ```
+ * val arg by argument().int().check(lazyMessage={"$it is not even"}) { it % 2 == 0 }
+ * ```
+ */
+@JvmName("nullableLazyCheck")
+@JsName("nullableLazyCheck")
+inline fun <AllT : Any, ValueT> ProcessedArgument<AllT?, ValueT>.check(
+        crossinline lazyMessage: (AllT) -> String = { it.toString() },
+        crossinline validator: (AllT) -> Boolean
+): ArgumentDelegate<AllT?> {
+    return validate { require(validator(it)) { lazyMessage(it) } }
 }

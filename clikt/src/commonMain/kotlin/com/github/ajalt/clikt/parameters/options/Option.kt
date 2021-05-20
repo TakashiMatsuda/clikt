@@ -6,7 +6,6 @@ import com.github.ajalt.clikt.mpp.isLetterOrDigit
 import com.github.ajalt.clikt.mpp.readEnvvar
 import com.github.ajalt.clikt.output.HelpFormatter
 import com.github.ajalt.clikt.parsers.OptionParser
-import com.github.ajalt.clikt.sources.ExperimentalValueSourceApi
 import com.github.ajalt.clikt.sources.ValueSource
 import kotlin.properties.ReadOnlyProperty
 import kotlin.reflect.KProperty
@@ -18,10 +17,10 @@ import kotlin.reflect.KProperty
  */
 interface Option {
     /** A name representing the values for this option that can be displayed to the user. */
-    val metavar: String?
+    fun metavar(context: Context): String?
 
     /** The description of this option, usually a single line. */
-    val help: String
+    val optionHelp: String
 
     /** The parser for this option's values. */
     val parser: OptionParser
@@ -44,15 +43,17 @@ interface Option {
     /** Optional set of strings to use when the user invokes shell autocomplete on a value for this option. */
     val completionCandidates: CompletionCandidates get() = CompletionCandidates.None
 
+    /** Optional explicit key to use when looking this option up from a [ValueSource] */
+    val valueSourceKey: String?
+
     /** Information about this option for the help output. */
-    val parameterHelp: HelpFormatter.ParameterHelp.Option?
-        get() = when {
-            hidden -> null
-            else -> HelpFormatter.ParameterHelp.Option(names, secondaryNames, metavar, help, nvalues, helpTags,
-                    groupName = (this as? StaticallyGroupedOption)?.groupName
-                            ?: (this as? GroupableOption)?.parameterGroup?.groupName
-            )
-        }
+    fun parameterHelp(context: Context): HelpFormatter.ParameterHelp.Option? = when {
+        hidden -> null
+        else -> HelpFormatter.ParameterHelp.Option(names, secondaryNames, metavar(context), optionHelp, nvalues, helpTags,
+                groupName = (this as? StaticallyGroupedOption)?.groupName
+                        ?: (this as? GroupableOption)?.parameterGroup?.groupName
+        )
+    }
 
     /**
      * Called after this command's argv is parsed to transform and store the option's value.
@@ -88,22 +89,22 @@ interface OptionDelegate<T> : GroupableOption, ReadOnlyProperty<ParameterHolder,
 
 internal fun inferOptionNames(names: Set<String>, propertyName: String): Set<String> {
     if (names.isNotEmpty()) {
-        val invalidName = names.find { !it.matches(Regex("""[!"#$%&'()*+,-./\\:;<=>?@\[\]^_`{|}~]{1,2}[\w-_]+""")) }
+        val invalidName = names.find { !it.matches(Regex("""[\-@/+]{1,2}[\w\-_]+""")) }
         require(invalidName == null) { "Invalid option name \"$invalidName\"" }
         return names
     }
     val normalizedName = "--" + propertyName.replace(Regex("""[a-z][A-Z]""")) {
         "${it.value[0]}-${it.value[1]}"
-    }.toLowerCase()
+    }.lowercase()
     return setOf(normalizedName)
 }
 
 internal fun inferEnvvar(names: Set<String>, envvar: String?, autoEnvvarPrefix: String?): String? {
     if (envvar != null) return envvar
     if (names.isEmpty() || autoEnvvarPrefix == null) return null
-    val name = splitOptionPrefix(names.maxBy { it.length }!!).second
+    val name = splitOptionPrefix(names.maxByOrNull { it.length }!!).second
     if (name.isEmpty()) return null
-    return autoEnvvarPrefix + "_" + name.replace(Regex("\\W"), "_").toUpperCase()
+    return autoEnvvarPrefix + "_" + name.replace(Regex("\\W"), "_").uppercase()
 }
 
 /** Split an option token into a pair of prefix to simple name. */
@@ -134,9 +135,8 @@ internal fun <EachT, AllT> deprecationTransformer(
     transformAll(it)
 }
 
-internal fun Option.longestName(): String? = names.maxBy { it.length }
+internal fun Option.longestName(): String? = names.maxByOrNull { it.length }
 
-@OptIn(ExperimentalValueSourceApi::class)
 internal sealed class FinalValue {
     data class Parsed(val values: List<OptionParser.Invocation>) : FinalValue()
     data class Sourced(val values: List<ValueSource.Invocation>) : FinalValue()
@@ -159,7 +159,6 @@ internal fun Option.getFinalValue(
     } ?: FinalValue.Parsed(emptyList())
 }
 
-@OptIn(ExperimentalValueSourceApi::class)
 private fun Option.readValueSource(context: Context): FinalValue? {
     return context.valueSource?.getValues(context, this)?.ifEmpty { null }
             ?.let { FinalValue.Sourced(it) }

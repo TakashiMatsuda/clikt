@@ -3,6 +3,7 @@ package com.github.ajalt.clikt.completion
 @RequiresOptIn
 @Retention(AnnotationRetention.BINARY)
 @Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
+@Deprecated(message = "This opt-in requirement is not used anymore. Remove its usages from your code.")
 annotation class ExperimentalCompletionCandidates
 
 /**
@@ -42,13 +43,42 @@ sealed class CompletionCandidates {
      * Specifically, you should set the variable `COMPREPLY` to the completion(s) for the current
      * word being typed. The word being typed can be retrieved from the `COMP_WORDS` array at index
      * `COMP_CWORD`.
+     *
+     * ## Fish
+     *
+     * The string returned from [generator] should be a Fish string with each completion suggestion
+     * separated by a newline. Each completion can optionally end with a tab, followed by a
+     * description of the suggestion.
+     *
+     * ```
+     * """'
+     * start
+     * stop
+     * help\\t"show the help for this command"
+     * test\\t"run test suite"
+     * '"""
+     * ```
+     *
+     * You can also construct the string from a fish command or function call, e.g.
+     *
+     * ```
+     * "\"(__fish_print_hostnames)\""
+     * ```
+     *
+     * or
+     *
+     * ```
+     * "\"(ls -1)\""
+     * ```
      */
-    @ExperimentalCompletionCandidates
     data class Custom(val generator: (ShellType) -> String?) : CompletionCandidates() {
-        enum class ShellType { BASH }
+        enum class ShellType { BASH, FISH }
         companion object {
             fun fromStdout(command: String) = Custom {
-                "COMPREPLY=(\$(compgen -W \"\$($command)\" -- \"\${COMP_WORDS[\$COMP_CWORD]}\"))"
+                when(it) {
+                    ShellType.FISH -> "\"($command)\""
+                    else -> "COMPREPLY=(\$(compgen -W \"\$($command)\" -- \"\${COMP_WORDS[\$COMP_CWORD]}\"))"
+                }
             }
         }
     }

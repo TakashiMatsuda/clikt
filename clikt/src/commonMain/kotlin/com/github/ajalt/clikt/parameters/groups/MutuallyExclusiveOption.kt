@@ -7,11 +7,14 @@ import com.github.ajalt.clikt.parsers.OptionParser
 import kotlin.properties.ReadOnlyProperty
 import kotlin.reflect.KProperty
 
-class MutuallyExclusiveOptions<OptT : Any, OutT>(
-        internal val options: List<OptionDelegate<OptT?>>,
-        override val groupName: String?,
-        override val groupHelp: String?,
-        internal val transformAll: (List<OptT>) -> OutT
+class MutuallyExclusiveOptionTransformContext(val context: Context)
+typealias MutuallyExclusiveOptionsTransform<OptT, OutT> = MutuallyExclusiveOptionTransformContext.(List<OptT>) -> OutT
+
+class MutuallyExclusiveOptions<OptT : Any, OutT> internal constructor(
+    internal val options: List<OptionDelegate<out OptT?>>,
+    override val groupName: String?,
+    override val groupHelp: String?,
+    internal val transformAll: MutuallyExclusiveOptionsTransform<OptT, OutT>,
 ) : ParameterGroupDelegate<OutT> {
     init {
         require(options.size > 1) { "must provide at least two options to a mutually exclusive group" }
@@ -47,7 +50,7 @@ class MutuallyExclusiveOptions<OptT : Any, OutT>(
         }
 
         val values = options.mapNotNull { it.value }
-        value = transformAll(values)
+        value = MutuallyExclusiveOptionTransformContext(context).transformAll(values)
     }
 
     override fun postValidate(context: Context) {
@@ -56,7 +59,20 @@ class MutuallyExclusiveOptions<OptT : Any, OutT>(
         }
     }
 
-    fun <T> copy(transformAll: (List<OptT>) -> T) = MutuallyExclusiveOptions(options, groupName, groupHelp, transformAll)
+    fun <T> copy(transformAll: MutuallyExclusiveOptionsTransform<OptT, T>) = MutuallyExclusiveOptions(options, groupName, groupHelp, transformAll)
+}
+
+/**
+ * Set the name and help for this option.
+ *
+ * Although you would normally pass the name and help strings as arguments to
+ * [mutuallyExclusiveOptions], this function can be more convenient for long help strings.
+ *
+ * @param name The name of the group.
+ * @param help A help message to display for this group.
+ */
+fun <OptT: Any, OutT> MutuallyExclusiveOptions<OptT, OutT>.help(name: String, help: String): MutuallyExclusiveOptions<OptT, OutT> {
+    return MutuallyExclusiveOptions(options, name, help, transformAll)
 }
 
 /**
@@ -78,16 +94,21 @@ class MutuallyExclusiveOptions<OptT : Any, OutT>(
  * )
  * ```
  *
+ * @param name If given, the options in this group will be grouped together under this value in the
+ * help output
+ * @param help If given, this text will be added in help output to the group. If [name] is null,
+ *   this value is not used.
+ *
  * @see com.github.ajalt.clikt.parameters.options.switch
  * @see com.github.ajalt.clikt.parameters.types.choice
  */
 @Suppress("unused")
 fun <T : Any> ParameterHolder.mutuallyExclusiveOptions(
-        option1: OptionDelegate<T?>,
-        option2: OptionDelegate<T?>,
-        vararg options: OptionDelegate<T?>,
-        name: String? = null,
-        help: String? = null
+    option1: OptionDelegate<out T?>,
+    option2: OptionDelegate<out T?>,
+    vararg options: OptionDelegate<out T?>,
+    name: String? = null,
+    help: String? = null,
 ): MutuallyExclusiveOptions<T, T?> {
     return MutuallyExclusiveOptions(listOf(option1, option2) + options, name, help) { it.lastOrNull() }
 }
@@ -107,9 +128,11 @@ fun <T : Any> MutuallyExclusiveOptions<T, T?>.single(): MutuallyExclusiveOptions
  * a [UsageError] is thrown.
  */
 fun <T : Any> MutuallyExclusiveOptions<T, T?>.required(): MutuallyExclusiveOptions<T, T> {
-    return copy {
-        transformAll(it)
-                ?: throw UsageError("Must provide one of ${options.joinToString { it.longestName()!! }}")
+    return copy { values ->
+        transformAll(values) ?: run {
+            val names = options.joinToString { it.longestName()!! }
+            throw UsageError(context.localization.requiredMutexOption(names))
+        }
     }
 }
 

@@ -16,7 +16,7 @@ import com.github.ajalt.clikt.parsers.OptionParser
 class EagerOption(
         override val names: Set<String>,
         override val nvalues: Int,
-        override val help: String,
+        override val optionHelp: String,
         override val hidden: Boolean,
         override val helpTags: Map<String, String>,
         override val groupName: String?,
@@ -26,14 +26,10 @@ class EagerOption(
                 helpTags: Map<String, String> = emptyMap(), groupName: String? = null,
                 callback: OptionTransformContext.() -> Unit)
             : this(names.toSet(), nvalues, help, hidden, helpTags, groupName, callback)
-
-    init {
-        require(names.isNotEmpty()) { "options must have at least one name" }
-    }
-
     override val secondaryNames: Set<String> get() = emptySet()
     override val parser: OptionParser = FlagOptionParser
-    override val metavar: String? get() = null
+    override fun metavar(context: Context): String? = null
+    override val valueSourceKey: String? get() = null
     override fun postValidate(context: Context) {}
     override fun finalize(context: Context, invocations: List<OptionParser.Invocation>) {
         this.callback(OptionTransformContext(this, context))

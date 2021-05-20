@@ -3,6 +3,7 @@ package com.github.ajalt.clikt.core
 import com.github.ajalt.clikt.completion.CompletionGenerator
 import com.github.ajalt.clikt.mpp.exitProcessMpp
 import com.github.ajalt.clikt.mpp.readEnvvar
+import com.github.ajalt.clikt.output.CliktConsole
 import com.github.ajalt.clikt.output.HelpFormatter.ParameterHelp
 import com.github.ajalt.clikt.output.TermUi
 import com.github.ajalt.clikt.parameters.arguments.Argument
@@ -57,9 +58,29 @@ abstract class CliktCommand(
         internal val allowMultipleSubcommands: Boolean = false,
         internal val treatUnknownOptionsAsArgs: Boolean = false
 ) : ParameterHolder {
-    val commandName = name ?: inferCommandName()
-    val commandHelp = help
-    val commandHelpEpilog = epilog
+    /**
+     * The name of this command, used in help output.
+     *
+     * You can set this by passing `name` to the [CliktCommand] constructor.
+     */
+    val commandName: String = name ?: inferCommandName()
+
+    /**
+     * The help text for this command.
+     *
+     * You can set this by passing `help` to the [CliktCommand] constructor, or by overriding this
+     * property.
+     */
+    open val commandHelp: String = help
+
+    /**
+     * Help text to display at the end of the help output, after any parameters.
+     *
+     * You can set this by passing `epilog` to the [CliktCommand] constructor, or by overriding this
+     * property.
+     */
+    open val commandHelpEpilog: String = epilog
+
     internal var _subcommands: List<CliktCommand> = emptyList()
     internal val _options: MutableList<Option> = mutableListOf()
     internal val _arguments: MutableList<Argument> = mutableListOf()
@@ -82,7 +103,7 @@ abstract class CliktCommand(
 
         if (currentContext.helpOptionNames.isNotEmpty()) {
             val names = currentContext.helpOptionNames - registeredOptionNames()
-            if (names.isNotEmpty()) _options += helpOption(names, currentContext.helpOptionMessage)
+            if (names.isNotEmpty()) _options += helpOption(names, currentContext.localization.helpOptionMessage())
         }
 
         for (command in _subcommands) {
@@ -93,9 +114,9 @@ abstract class CliktCommand(
     }
 
     private fun allHelpParams(): List<ParameterHelp> {
-        return _options.mapNotNull { it.parameterHelp } +
-                _arguments.mapNotNull { it.parameterHelp } +
-                _groups.mapNotNull { it.parameterHelp } +
+        return _options.mapNotNull { it.parameterHelp(currentContext) } +
+                _arguments.mapNotNull { it.parameterHelp(currentContext) } +
+                _groups.mapNotNull { it.parameterHelp(currentContext) } +
                 _subcommands.map { ParameterHelp.Subcommand(it.commandName, it.shortHelp(), it.helpTags) }
     }
 
@@ -107,17 +128,14 @@ abstract class CliktCommand(
     private fun generateCompletion() {
         if (autoCompleteEnvvar == null) return
         val envvar = when {
-            autoCompleteEnvvar.isBlank() -> "_${commandName.replace("-", "_").toUpperCase()}_COMPLETE"
+            autoCompleteEnvvar.isBlank() -> "_${commandName.replace("-", "_").uppercase()}_COMPLETE"
             else -> autoCompleteEnvvar
         }
-        val envval = readEnvvar(envvar) ?: return
-        val completion = CompletionGenerator.generateCompletion(command = this, zsh = "zsh" in envval)
-        throw PrintCompletionMessage(completion, forceUnixLineEndings = true)
-    }
 
-    @Deprecated("Renamed to currentContext", ReplaceWith("currentContext"))
-    val context: Context
-        get() = currentContext
+        val envval = readEnvvar(envvar) ?: return
+
+        CompletionGenerator.throwCompletionMessage(this, envval)
+    }
 
     /**
      * This command's context.
@@ -227,6 +245,20 @@ abstract class CliktCommand(
      */
     open fun aliases(): Map<String, List<String>> = emptyMap()
 
+    /** Print the default [line separator][CliktConsole.lineSeparator] to `stdout` */
+    protected fun echo() {
+        echo("")
+    }
+
+    @Deprecated(
+            message="Specify message explicitly with `err` or `lineSeparator`",
+            replaceWith = ReplaceWith("echo(\"\", err=err, lineSeparator=lineSeparator)")
+    )
+    /** @suppress */
+    protected fun echo(err: Boolean, lineSeparator: String ) {
+        echo("", err = err, lineSeparator = lineSeparator)
+    }
+
     /**
      * Print the [message] to the screen.
      *
@@ -245,6 +277,112 @@ abstract class CliktCommand(
             lineSeparator: String = currentContext.console.lineSeparator
     ) {
         TermUi.echo(message, trailingNewline, err, currentContext.console, lineSeparator)
+    }
+
+    /**
+     * Prompt a user for text input.
+     *
+     * If the user sends a terminate signal (e.g. ctrl-c) while the prompt is active, null will be returned.
+     *
+     * @param text The text to display for the prompt.
+     * @param default The default value to use for the input. If the user enters a newline without any other
+     *   value, [default] will be returned.
+     * @param hideInput If true, the user's input will not be echoed back to the screen. This is commonly used
+     *   for password inputs.
+     * @param requireConfirmation If true, the user will be required to enter the same value twice before it
+     *   is accepted.
+     * @param confirmationPrompt The text to show the user when [requireConfirmation] is true.
+     * @param promptSuffix A delimiter printed between the [text] and the user's input.
+     * @param showDefault If true, the [default] value will be shown as part of the prompt.
+     * @return the user's input, or null if the stdin is not interactive and EOF was encountered.
+     */
+    protected fun prompt(
+            text: String,
+            default: String? = null,
+            hideInput: Boolean = false,
+            requireConfirmation: Boolean = false,
+            confirmationPrompt: String = "Repeat for confirmation: ",
+            promptSuffix: String = ": ",
+            showDefault: Boolean = true,
+    ): String? {
+        return TermUi.prompt(
+                text = text,
+                default = default,
+                hideInput = hideInput,
+                requireConfirmation = requireConfirmation,
+                confirmationPrompt = confirmationPrompt,
+                promptSuffix = promptSuffix,
+                showDefault = showDefault,
+                console = currentContext.console,
+                convert = { it }
+        )
+    }
+
+    /**
+     * Prompt a user for text input and convert the result.
+     *
+     * If the user sends a terminate signal (e.g. ctrl-c) while the prompt is active, null will be returned.
+     *
+     * @param text The text to display for the prompt.
+     * @param default The default value to use for the input. If the user enters a newline without any other
+     *   value, [default] will be returned. This parameter is a String instead of [T], since it will be
+     *   displayed to the user.
+     * @param hideInput If true, the user's input will not be echoed back to the screen. This is commonly used
+     *   for password inputs.
+     * @param requireConfirmation If true, the user will be required to enter the same value twice before it
+     *   is accepted.
+     * @param confirmationPrompt The text to show the user when [requireConfirmation] is true.
+     * @param promptSuffix A delimiter printed between the [text] and the user's input.
+     * @param showDefault If true, the [default] value will be shown as part of the prompt.
+     * @param convert A callback that will convert the text that the user enters to the return value of the
+     *   function. If the callback raises a [UsageError], its message will be printed and the user will be
+     *   asked to enter a new value. If [default] is not null and the user does not input a value, the value
+     *   of [default] will be passed to this callback.
+     * @return the user's input, or null if the stdin is not interactive and EOF was encountered.
+     */
+    protected fun <T> prompt(
+            text: String,
+            default: String? = null,
+            hideInput: Boolean = false,
+            requireConfirmation: Boolean = false,
+            confirmationPrompt: String = "Repeat for confirmation: ",
+            promptSuffix: String = ": ",
+            showDefault: Boolean = true,
+            convert: ((String) -> T)
+    ): T? {
+        return TermUi.prompt(
+                text = text,
+                default = default,
+                hideInput = hideInput,
+                requireConfirmation = requireConfirmation,
+                confirmationPrompt = confirmationPrompt,
+                promptSuffix = promptSuffix,
+                showDefault = showDefault,
+                console = currentContext.console,
+                convert = convert
+        )
+    }
+
+    /**
+     * Prompt for user confirmation.
+     *
+     * Responses will be read from stdin, even if it's redirected to a file.
+     *
+     * @param text the question to ask
+     * @param default the default, used if stdin is empty
+     * @param abort if `true`, a negative answer aborts the program by raising [Abort]
+     * @param promptSuffix a string added after the question and choices
+     * @param showDefault if false, the choices will not be shown in the prompt.
+     * @return the user's response, or null if stdin is not interactive and EOF was encountered.
+     */
+    protected fun confirm(
+            text: String,
+            default: Boolean = false,
+            abort: Boolean = false,
+            promptSuffix: String = ": ",
+            showDefault: Boolean = true
+    ): Boolean? {
+        return TermUi.confirm(text, default, abort, promptSuffix, showDefault, currentContext.console)
     }
 
     /**
@@ -290,7 +428,7 @@ abstract class CliktCommand(
             echo(e.message, err = true)
             exitProcessMpp(1)
         } catch (e: Abort) {
-            echo("Aborted!", err = true)
+            echo(currentContext.localization.aborted(), err = true)
             exitProcessMpp(if (e.error) 1 else 0)
         }
     }
@@ -382,5 +520,5 @@ private fun CliktCommand.inferCommandName(): String {
     val name = classSimpleName()
     return name.removeSuffix("Command").replace(Regex("([a-z])([A-Z])")) {
         "${it.groupValues[1]}-${it.groupValues[2]}"
-    }.toLowerCase()
+    }.lowercase()
 }

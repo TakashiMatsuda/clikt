@@ -1,21 +1,11 @@
-buildscript {
-    repositories {
-        jcenter()
-    }
-}
-
 plugins {
-    id("org.jetbrains.kotlin.plugin.serialization").version("1.3.72")
+    id("org.jetbrains.kotlin.plugin.serialization") version "1.4.10"
 }
 
 application {
-    mainClassName = "com.github.ajalt.clikt.samples.json.MainKt"
-}
-
-repositories {
-    jcenter()
+    mainClass.set("com.github.ajalt.clikt.samples.json.MainKt")
 }
 
 dependencies {
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-runtime:0.20.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.0.1")
 }

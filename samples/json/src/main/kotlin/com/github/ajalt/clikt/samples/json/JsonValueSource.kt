@@ -3,26 +3,22 @@ package com.github.ajalt.clikt.samples.json
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.InvalidFileFormat
 import com.github.ajalt.clikt.parameters.options.Option
-import com.github.ajalt.clikt.sources.ExperimentalValueSourceApi
 import com.github.ajalt.clikt.sources.ValueSource
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.UnstableDefault
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.*
 import java.io.File
 
 /**
  * A [ValueSource] that uses Kotlin serialization to parse JSON files
  */
-@OptIn(ExperimentalValueSourceApi::class)
 class JsonValueSource(
         private val root: JsonObject
 ) : ValueSource {
     override fun getValues(context: Context, option: Option): List<ValueSource.Invocation> {
         var cursor: JsonElement? = root
-        for (part in context.commandNameWithParents().drop(1) + ValueSource.name(option)) {
+        val parts = option.valueSourceKey?.split(".")
+                ?: context.commandNameWithParents().drop(1) + ValueSource.name(option)
+        for (part in parts) {
             if (cursor !is JsonObject) return emptyList()
             cursor = cursor[part]
         }
@@ -35,12 +31,11 @@ class JsonValueSource(
     }
 
     companion object {
-        @OptIn(UnstableDefault::class)
         fun from(file: File, requireValid: Boolean = false): JsonValueSource {
             if (!file.isFile) return JsonValueSource(JsonObject(emptyMap()))
 
             val json = try {
-                Json.plain.parseJson(file.readText()) as? JsonObject
+                Json.parseToJsonElement(file.readText()) as? JsonObject
                         ?: throw InvalidFileFormat(file.path, "object expected", 1)
             } catch (e: SerializationException) {
                 if (requireValid) throw InvalidFileFormat(file.name, e.message ?: "could not read file")

@@ -1,7 +1,7 @@
 application {
-    mainClassName = "com.github.ajalt.clikt.samples.plugins.MainKt"
+    mainClass.set("com.github.ajalt.clikt.samples.plugins.MainKt")
 }
 
 dependencies {
-    compile("org.kodein.di:kodein-di-generic-jvm:5.2.0")
+    api("org.kodein.di:kodein-di-generic-jvm:5.2.0")
 }

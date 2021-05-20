@@ -74,30 +74,33 @@ them with the included [`runsample` script](runsample).
 
 ## Installation
 
-Clikt is distributed through [Maven Central](https://search.maven.org/artifact/com.github.ajalt/clikt).
+Clikt is distributed through [Maven Central](https://search.maven.org/artifact/com.github.ajalt.clikt/clikt).
 
 ```groovy
 dependencies {
-   implementation("com.github.ajalt:clikt:2.7.1")
+   implementation("com.github.ajalt.clikt:clikt:3.2.0")
 }
 ```
 
-#### Multiplatform
 
-For multiplatform projects, use `"com.github.ajalt:clikt-multiplatform:$cliktVersion"` instead.
-You'll need to use Gradle 6 or newer.
+###### In version 3.0, the maven coordinates changed. Make sure you're using the new coordinates if you're updating from an older version.
+
+###### If you're using Maven instead of Gradle, use `<artifactId>clikt-jvm</artifactId>`
+
+#### Multiplatform
 
 Clikt supports the following targets: `jvm`, `mingwX64`, `linuxX64`, `macosX64`, and `js` (for both
 NodeJS and Browsers). [See the docs](https://ajalt.github.io/clikt/advanced/#multiplatform-support) for more
-information about functionality supported on each target.
+information about functionality supported on each target. You'll need to use Gradle 6 or newer.
 
 #### Snapshots
 
 <details>
-   <summary>Snapshot builds are also available</summary>
+<summary>Snapshot builds are also available</summary>
    
-[<img src="https://img.shields.io/nexus/s/com.github.ajalt/clikt?color=blue&label=latest%20shapshot&server=https%3A%2F%2Foss.sonatype.org"/>](https://oss.sonatype.org/content/repositories/snapshots/com/github/ajalt/clikt/)
+<a href="https://oss.sonatype.org/content/repositories/snapshots/com/github/ajalt/clikt/clikt/"><img src="https://img.shields.io/nexus/s/com.github.ajalt.clikt/clikt?color=blue&label=latest%20shapshot&server=https%3A%2F%2Foss.sonatype.org"/></a>
    
+<p>
 You'll need to add the Sonatype snapshots repository: 
       
 ```kotlin
@@ -107,11 +110,12 @@ repositories {
     }
 }
 ```
+</p>
 </details>
 
 ## License
 
-    Copyright 2018-2020 AJ Alt
+    Copyright 2018-2021 AJ Alt
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
